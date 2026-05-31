@@ -1,0 +1,683 @@
+import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
+import { restaurants } from '../data/restaurants';
+
+const SearchBarIcon = ({ color = '#64748b' }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
+
+const FilterIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 6h16M7 12h10M10 18h4" />
+  </svg>
+);
+
+const typeStyles = {
+  viewed: { label: 'Viewed', bg: '#eff6ff', color: '#2563eb', emoji: '👁️' },
+  compared: { label: 'Compared', bg: '#f5f3ff', color: '#8b5cf6', emoji: '🔁' },
+  searched: { label: 'Searched', bg: '#ecfdf5', color: '#059669', emoji: '🔎' },
+};
+
+const filterOptions = [
+  { id: 'all', label: 'All' },
+  { id: 'viewed', label: 'Viewed' },
+  { id: 'compared', label: 'Compared' },
+  { id: 'searched', label: 'Searches' },
+];
+
+const initialHistory = [
+  {
+    id: 1,
+    restaurantId: 1,
+    type: 'viewed',
+    time: '2 hours ago',
+    note: 'Viewed',
+  },
+  {
+    id: 2,
+    restaurantId: 3,
+    type: 'compared',
+    time: '3 hours ago',
+    note: 'Compared',
+  },
+  {
+    id: 3,
+    restaurantId: 4,
+    type: 'viewed',
+    time: 'Yesterday',
+    note: 'Viewed',
+  },
+  {
+    id: 4,
+    restaurantId: 2,
+    type: 'searched',
+    time: 'Yesterday',
+    note: 'Search: "Best burgers near me"',
+  },
+  {
+    id: 5,
+    restaurantId: 5,
+    type: 'viewed',
+    time: '2 days ago',
+    note: 'Viewed',
+  },
+  {
+    id: 6,
+    restaurantId: 6,
+    type: 'compared',
+    time: '3 days ago',
+    note: 'Compared',
+  },
+  {
+    id: 7,
+    restaurantId: 7,
+    type: 'viewed',
+    time: '4 days ago',
+    note: 'Viewed',
+  },
+  {
+    id: 8,
+    restaurantId: 8,
+    type: 'searched',
+    time: '1 week ago',
+    note: 'Search: "Healthy food options"',
+  },
+];
+
+const HistoryPage = () => {
+  const navigate = useNavigate();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [activeNav, setActiveNav] = useState('history');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedType, setSelectedType] = useState('all');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState(null);
+  // Initialize history from localStorage key 'userHistory', fallback to initialHistory
+  const [historyItems, setHistoryItems] = useState(() => {
+    try {
+      const raw = localStorage.getItem('userHistory');
+      return raw ? JSON.parse(raw) : initialHistory;
+    } catch (e) {
+      console.error('Failed to read userHistory from localStorage', e);
+      return initialHistory;
+    }
+  });
+
+  const currentFilterLabel = filterOptions.find((option) => option.id === selectedType)?.label || 'All';
+
+  const stats = useMemo(() => {
+    const viewed = historyItems.filter((item) => item.type === 'viewed').length;
+    const compared = historyItems.filter((item) => item.type === 'compared').length;
+    const searched = historyItems.filter((item) => item.type === 'searched').length;
+    return { viewed, compared, searched };
+  }, [historyItems]);
+
+  // Persist historyItems to localStorage whenever it changes
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('userHistory', JSON.stringify(historyItems));
+    } catch (e) {
+      console.error('Failed to save userHistory to localStorage', e);
+    }
+  }, [historyItems]);
+
+  // Listen for external history updates (from historyService or other pages)
+  React.useEffect(() => {
+    const handler = (e) => {
+      try {
+        const arr = e?.detail ?? JSON.parse(localStorage.getItem('userHistory') || '[]');
+        setHistoryItems(arr);
+      } catch (err) {
+        // ignore
+      }
+    };
+    window.addEventListener('historyUpdated', handler);
+    return () => window.removeEventListener('historyUpdated', handler);
+  }, []);
+
+  /* Event tracking helpers */
+  const buildHistoryItem = (data) => ({
+    id: Date.now() + Math.floor(Math.random() * 9999),
+    ...data,
+  });
+
+  const logViewEvent = (restaurant) => {
+    const item = buildHistoryItem({
+      name: restaurant.name,
+      image: restaurant.image,
+      cuisine: restaurant.cuisine,
+      priceRange: restaurant.priceRange,
+      rating: restaurant.rating ?? 0,
+      location: restaurant.location ?? '',
+      time: 'Just now',
+      type: 'viewed',
+      note: 'Viewed',
+    });
+    setHistoryItems((prev) => [item, ...prev]);
+  };
+
+  const logSearchEvent = (query, count = 0) => {
+    const item = buildHistoryItem({
+      name: `Search: ${query}`,
+      image: '',
+      cuisine: '',
+      priceRange: '',
+      rating: 0,
+      location: '',
+      time: 'Just now',
+      type: 'searched',
+      note: `Search (${count}) — ${query}`,
+    });
+    setHistoryItems((prev) => [item, ...prev]);
+  };
+
+  const logCompareEvent = (arrayOfRestaurants) => {
+    const items = arrayOfRestaurants.map((r) => buildHistoryItem({
+      name: r.name,
+      image: r.image,
+      cuisine: r.cuisine,
+      priceRange: r.priceRange,
+      rating: r.rating ?? 0,
+      location: r.location ?? '',
+      time: 'Just now',
+      type: 'compared',
+      note: 'Compared',
+    }));
+    setHistoryItems((prev) => [...items, ...prev]);
+  };
+
+  const historyWithDetails = useMemo(
+    () => historyItems.map((item) => {
+      const rest = restaurants.find((r) => r.id === item.restaurantId || (item.name && r.name === item.name)) || {};
+      return { ...rest, ...item };
+    }),
+    [historyItems]
+  );
+
+  const filteredHistory = useMemo(() => {
+    return historyWithDetails.filter((item) => {
+      const query = searchQuery.trim().toLowerCase();
+      if (selectedType !== 'all' && item.type !== selectedType) return false;
+      if (!query) return true;
+      return [item.name, item.cuisine, item.location, item.note].some((value) =>
+        value?.toLowerCase().includes(query)
+      );
+    });
+  }, [historyWithDetails, searchQuery, selectedType]);
+
+  const handleSidebarNavClick = (id) => {
+    setActiveNav(id);
+    if (id === 'home') navigate('/dashboard');
+    if (id === 'search') navigate('/search');
+    if (id === 'compare') navigate('/compare');
+    if (id === 'history') navigate('/history');
+    if (id === 'profile') navigate('/profile');
+    if (id === 'settings') navigate('/settings');
+  };
+
+  const clearAll = () => {
+    if (window.confirm('Clear all history? This cannot be undone.')) {
+      setHistoryItems([]);
+    }
+  };
+
+  const handleView = (id) => {
+    const item = historyWithDetails.find((historyItem) => historyItem.id === id);
+    if (item) {
+      setDetailItem(item);
+    }
+  };
+
+  const handleCloseDetail = () => {
+    setDetailItem(null);
+  };
+
+  const handleDelete = (id) => {
+    if (window.confirm('Delete this history entry?')) {
+      setHistoryItems((prev) => prev.filter((item) => item.id !== id));
+    }
+  };
+
+  const removeItem = (id) => handleDelete(id);
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f8fafc', fontFamily: "'Poppins', sans-serif" }}>
+      <SidebarNav activeItem={activeNav} onNavigate={handleSidebarNavClick} isSidebarOpen={isSidebarOpen} />
+
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        <header style={{ padding: '20px 26px 16px', background: '#ffffff', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen((prev) => !prev)}
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '12px',
+                  border: '1px solid #dbe3ee',
+                  background: '#f8fafc',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 3px rgba(15,23,42,0.05)',
+                  flexShrink: 0,
+                }}
+              >
+                <SidebarToggleIcon open={isSidebarOpen} />
+              </button>
+              <div>
+                <p style={{ fontSize: '28px', fontWeight: '800', color: '#2563eb', margin: '0 0 16px', lineHeight: 1.05 }}>
+                  Browsing History
+                </p>
+                <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
+                  Your recent restaurant views, searches, and comparisons
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={clearAll}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 24px',
+                borderRadius: '15px',
+                border: '1px solid #dc2626',
+                background: '#ffffff',
+                color: '#dc2626',
+                fontSize: '13px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                boxShadow: 'none',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+              <span>Clear All</span>
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontFamily: 'sans-serif' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '12px 16px' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search history..."
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    outline: 'none',
+                    background: 'transparent',
+                    fontSize: '14px',
+                    color: '#1e293b',
+                  }}
+                />
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={() => setFilterOpen((prev) => !prev)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '14px',
+                    padding: '12px 18px',
+                    fontSize: '14px',
+                    color: '#1e293b',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                  </svg>
+                  <span>{currentFilterLabel}</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+
+                {filterOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 10px)',
+                    zIndex: 20,
+                    width: '180px',
+                    padding: '8px',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '20px',
+                    boxShadow: '0 18px 48px rgba(15,23,42,0.12)',
+                  }}>
+                    {filterOptions.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedType(option.id);
+                          setFilterOpen(false);
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 14px',
+                          borderRadius: '14px',
+                          border: 'none',
+                          background: selectedType === option.id ? '#eff6ff' : 'transparent',
+                          color: selectedType === option.id ? '#1d4ed8' : '#0f172a',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: selectedType === option.id ? 700 : 500,
+                        }}
+                      >
+                        <span>{option.label}</span>
+                        {selectedType === option.id ? ' ✓' : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', background: '#ffffff', borderRadius: '20px', padding: '20px 24px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(15,23,42,0.01)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', backgroundColor: '#eff6ff', borderRadius: '50%' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '24px', fontWeight: '700', color: '#000000', lineHeight: '1.2' }}>{stats.viewed}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '500', marginTop: '2px' }}>Restaurants Viewed</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', background: '#ffffff', borderRadius: '20px', padding: '20px 24px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(15,23,42,0.01)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', backgroundColor: '#f5f3ff', borderRadius: '50%' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '24px', fontWeight: '700', color: '#000000', lineHeight: '1.2' }}>{stats.compared}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '500', marginTop: '2px' }}>Comparisons Made</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', background: '#ffffff', borderRadius: '20px', padding: '20px 24px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(15,23,42,0.01)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px', backgroundColor: '#f0fdf4', borderRadius: '50%' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '24px', fontWeight: '700', color: '#000000', lineHeight: '1.2' }}>{stats.searched}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '500', marginTop: '2px' }}>Searches Performed</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+          <div style={{ display: 'grid', gap: '18px' }}>
+            {filteredHistory.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#94a3b8', padding: '40px 20px', borderRadius: '18px', background: '#ffffff', border: '1px solid #e2e8f0' }}>
+                <p style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>No history found</p>
+                <p style={{ margin: '8px 0 0', fontSize: '13px' }}>Try a different search or clear the filter.</p>
+              </div>
+            ) : (
+              filteredHistory.map((item) => {
+                const badgeStyle = typeStyles[item.type] || typeStyles.viewed;
+                const statusLabel = item.type === 'searched'
+                  ? 'Searched'
+                  : item.type === 'compared'
+                    ? item.note || 'Compared'
+                    : 'Viewed';
+                return (
+                  <div
+                    key={item.id}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-4px)';
+                      e.currentTarget.style.boxShadow = '0 12px 24px rgba(15, 23, 42, 0.06)';
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0px)';
+                      e.currentTarget.style.boxShadow = '0 2px 12px rgba(0, 0, 0, 0.01)';
+                      e.currentTarget.style.borderColor = '#f1f5f9';
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: '#ffffff',
+                      border: '1px solid #f1f5f9',
+                      borderRadius: '20px',
+                      padding: '16px 24px',
+                      boxShadow: '0 2px 12px rgba(0, 0, 0, 0.01)',
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        style={{ width: '96px', height: '96px', borderRadius: '16px', objectFit: 'cover' }}
+                      />
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: '#0f172a' }}>{item.name}</h3>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: badgeStyle.bg, color: badgeStyle.color, fontSize: '12px', fontWeight: '600', padding: '3px 10px', borderRadius: '100px' }}>
+                            <span style={{ width: '6px', height: '6px', backgroundColor: badgeStyle.color, borderRadius: '50%', display: 'inline-block' }} />
+                            {statusLabel}
+                          </span>
+                        </div>
+
+                        <span style={{ fontSize: '14px', color: '#64748b' }}>
+                          {item.cuisine} • {item.priceRange}
+                        </span>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '2px', color: '#64748b', fontSize: '13px' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#475569', fontWeight: '500' }}>
+                            <span style={{ color: '#fbbf24' }}>★</span> {item.rating}
+                          </span>
+                          <span style={{ color: '#64748b' }}>{item.location}</span>
+                          <span style={{ color: '#94a3b8' }}>• {item.time}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleView(item.id)}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#f1f5f9';
+                          e.currentTarget.style.borderColor = '#cbd5e1';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#ffffff';
+                          e.currentTarget.style.borderColor = '#e2e8f0';
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          background: '#ffffff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '100px',
+                          padding: '8px 20px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          color: '#0f172a',
+                          cursor: 'pointer',
+                          boxShadow: 'none',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                          <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <span>View</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item.id)}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = '#ef4444';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = '#475569';
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#475569',
+                          cursor: 'pointer',
+                          padding: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'color 0.2s ease',
+                        }}
+                      >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          <line x1="10" y1="11" x2="10" y2="17"></line>
+                          <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </main>
+
+      {detailItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+          <div style={{ width: '92%', maxWidth: '720px', background: '#ffffff', borderRadius: '24px', overflow: 'hidden', boxShadow: '0 30px 80px rgba(15,23,42,0.25)', fontFamily: "'Poppins', sans-serif" }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '24px 28px', borderBottom: '1px solid #e2e8f0' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '22px', fontWeight: '800', color: '#0f172a' }}>{detailItem.name}</h2>
+                <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '13px' }}>{detailItem.note || 'Compared item details'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseDetail}
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '12px',
+                  border: '1px solid #e2e8f0',
+                  background: '#ffffff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '18px',
+                  color: '#64748b',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', padding: '28px' }}>
+              <div>
+                <img
+                  src={detailItem.image}
+                  alt={detailItem.name}
+                  style={{ width: '100%', borderRadius: '20px', height: '260px', objectFit: 'cover', marginBottom: '20px' }}
+                />
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13px', color: '#0f172a', fontWeight: '600', background: '#eff6ff', padding: '8px 12px', borderRadius: '999px' }}>
+                    {detailItem.cuisine}
+                  </span>
+                  <span style={{ fontSize: '13px', color: '#0f172a', fontWeight: '600', background: '#f8fafc', padding: '8px 12px', borderRadius: '999px' }}>
+                    {detailItem.priceRange}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '18px', borderRadius: '20px', background: '#f8fafc' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginBottom: '6px' }}>Rating</div>
+                    <div style={{ fontSize: '20px', fontWeight: '700', color: '#0f172a' }}>{detailItem.rating ?? 0} ★</div>
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#f97316', fontWeight: '700' }}>Top score</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '18px', borderRadius: '20px', background: '#f8fafc' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginBottom: '6px' }}>AI Sentiment</div>
+                    <div style={{ fontSize: '20px', fontWeight: '700', color: (detailItem.sentiment ?? 0) >= 80 ? '#16a34a' : (detailItem.sentiment ?? 0) >= 60 ? '#ca8a04' : '#dc2626' }}>
+                      {detailItem.sentiment ?? 0}%
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Customer mood</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '18px', borderRadius: '20px', background: '#f8fafc' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginBottom: '6px' }}>Reviews</div>
+                    <div style={{ fontSize: '20px', fontWeight: '700', color: '#0f172a' }}>{(detailItem.reviews ?? 0).toLocaleString()}</div>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total reviews</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '18px', borderRadius: '20px', background: '#f8fafc' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginBottom: '6px' }}>Wait Time</div>
+                    <div style={{ fontSize: '20px', fontWeight: '700', color: '#0f172a' }}>{detailItem.waitTimeLabel || (detailItem.waitTime ? `${detailItem.waitTime} min` : 'N/A')}</div>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Estimated wait</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '0 28px 24px', color: '#475569' }}>
+              <p style={{ margin: 0, fontSize: '13px', lineHeight: 1.7 }}>
+                {detailItem.location} • {detailItem.cuisine} • {detailItem.priceRange}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default HistoryPage;
