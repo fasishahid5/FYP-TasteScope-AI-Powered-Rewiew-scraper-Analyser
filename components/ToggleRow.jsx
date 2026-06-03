@@ -2,19 +2,34 @@ import React from 'react';
 
 export default function ToggleRow({ title, desc, checked, onChange }) {
   return (
-    <div className="flex items-center justify-between rounded-lg bg-white px-4 py-3 border border-[#eef2f6]">
-      <div>
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
-        <p className="mt-1 text-xs text-[#64748b]">{desc}</p>
+    <div className="w-full flex items-center justify-between p-3.5 rounded-2xl hover:bg-gray-100/60 dark:hover:bg-gray-800/40 transition-all duration-300 ease-out">
+      <div className="flex flex-col gap-1 pr-6 select-none">
+        <span className="text-sm font-semibold text-gray-900 dark:text-white transition-colors duration-200">
+          {title}
+        </span>
+        <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200">
+          {desc}
+        </span>
       </div>
-
+      
+      {/* Width-wise Wide Premium Outer Track */}
       <button
         type="button"
         onClick={onChange}
-        className={`flex h-6 w-11 items-center rounded-full p-1 transition duration-300 ${checked ? 'justify-end bg-[#0284c7]' : 'justify-start bg-[#e6edf3]'}`}
-        aria-pressed={checked}
+        className={`relative inline-flex h-6.5 w-14 flex-shrink-0 items-center rounded-full border-2 border-transparent cursor-pointer outline-none focus:outline-none transition-colors duration-500 will-change-colors ${
+          checked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+        }`}
       >
-        <span className="h-4 w-4 rounded-full bg-white shadow-sm" />
+        {/* Dynamic Fluid Swiping Knob with Spring Easing */}
+        <span
+          className={`pointer-events-none inline-block h-5.5 w-5.5 rounded-full bg-white shadow-md ring-0 will-change-transform ${
+            checked ? 'translate-x-7' : 'translate-x-0.5'
+          }`}
+          style={{
+            // Premium fluid custom spring easing logic for organic inertia
+            transition: 'transform 500ms cubic-bezier(0.34, 1.56, 0.64, 1)'
+          }}
+        />
       </button>
     </div>
   );

@@ -118,11 +118,10 @@ const registerUser = async (req, res) => {
       name: fullName,
       email,
       password,
-      // Professional approach: never grant owner at signup. Owners must request access and be approved.
-      role: 'customer',
+      role: coercedRole,
       provider: 'local',
       verificationToken,
-      ownerRequest: coercedRole === 'owner' ? { status: 'draft' } : undefined,
+      ownerRequest: coercedRole === 'owner' ? { status: 'pending' } : undefined,
     });
 
     await user.save();

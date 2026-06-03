@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-google-maps/api": "^2.20.8",
     "axios": "^1.13.2",
     "clsx": "^2.1.0",
     "country-state-city": "^3.2.1",
@@ -19,6 +20,7 @@
     "passport-google-oauth20": "^2.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.9.5",
     "react-select": "^5.10.2",
     "recharts": "^3.8.0",

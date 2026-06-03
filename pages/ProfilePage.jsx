@@ -518,8 +518,8 @@ const ProfilePage = () => {
               <SidebarToggleIcon open={isSidebarOpen} />
             </button>
             <div>
-              <p style={{ fontSize: '12px', fontWeight: '600', color: '#2563eb', margin: 0 }}>Profile Overview</p>
-              <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: '4px 0 0' }}>{displayName}</h1>
+              <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#2563eb', margin: '4px 0 0' }}>{displayName}</h1>
+              <p style={{ fontSize: '12px', fontWeight: '600', color: '#475569', margin: 0 }}>Profile Overview</p>         
             </div>
           </div>
         </header>

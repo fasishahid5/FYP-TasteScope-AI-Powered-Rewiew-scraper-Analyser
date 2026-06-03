@@ -1,17 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
+import GoogleMapView from '../components/GoogleMapView';
+import AutocompleteSearch from '../components/AutocompleteSearch';
 import { restaurants } from '../data/restaurants';
 import { getStoredUser } from '../lib/auth';
-
-// Search icon used inside the search bar and search button.
-const SearchBarIcon = ({ color = '#94a3b8' }) => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-    stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
-  </svg>
-);
 
 // Filter icon for the filter button.
 const FilterIcon = () => (
@@ -24,144 +17,13 @@ const FilterIcon = () => (
 );
 
 // ─── SENTIMENT HELPER ────────────────────────────────────────────────────────
-// Returns label and colours based on the AI sentiment score (0–100).
-// >= 80 = Positive (green), >= 60 = Neutral (yellow), below 60 = Negative (red).
 const getSentiment = (score) => {
   if (score >= 80) return { label: 'Positive', textColor: '#15803d', bg: '#dcfce7', dot: '#22c55e' };
   if (score >= 60) return { label: 'Neutral',  textColor: '#b45309', bg: '#fef3c7', dot: '#f59e0b' };
   return               { label: 'Negative', textColor: '#dc2626', bg: '#fee2e2', dot: '#ef4444' };
 };
 
-// ─── MAP COORDINATE CONVERTER ────────────────────────────────────────────────
-// Converts a restaurant's real-world lat/lng into x,y pixel position
-// inside our 600×420 SVG that covers Lahore's bounding box.
-const toMapXY = (lat, lng) => {
-  // These bounds cover all 8 restaurant locations in Lahore.
-  const minLat = 31.430, maxLat = 31.570;
-  const minLng = 74.290, maxLng = 74.430;
-  // Usable drawing area: 500×350px with 50px left/right + 35px top/bottom padding.
-  const x = Math.round(((lng - minLng) / (maxLng - minLng)) * 500 + 50);
-  const y = Math.round(((maxLat - lat) / (maxLat - minLat)) * 350 + 35);
-  return { x, y };
-};
-
-// ─── MAP SVG COMPONENT ───────────────────────────────────────────────────────
-// Draws a simplified city-style map with restaurants plotted as pins.
-// Pins are blue normally, and turn the sentiment colour when hovered.
-const MapView = ({ visibleRestaurants, hoveredPin, onPinHover }) => (
-  <svg
-    viewBox="0 0 600 420"
-    width="100%"
-    height="100%"
-    preserveAspectRatio="xMidYMid slice"
-    style={{ display: 'block' }}
-  >
-    {/* ── Background ────────────────────────────────────────────────── */}
-    <rect width="600" height="420" fill="#e8edf3" />
-
-    {/* ── Neighbourhood blocks (light grey areas) ───────────────────── */}
-    <rect x="58"  y="48"  width="172" height="128" rx="4" fill="#dce4ee" />
-    <rect x="268" y="58"  width="182" height="112" rx="4" fill="#dce4ee" />
-    <rect x="98"  y="208" width="152" height="122" rx="4" fill="#dce4ee" />
-    <rect x="308" y="198" width="202" height="152" rx="4" fill="#dce4ee" />
-    <rect x="448" y="48"  width="132" height="102" rx="4" fill="#dce4ee" />
-    <rect x="38"  y="298" width="102" height="92"  rx="4" fill="#dce4ee" />
-
-    {/* ── Water / park feature ──────────────────────────────────────── */}
-    <ellipse cx="188" cy="328" rx="66" ry="28" fill="#bed3e8" opacity="0.65" />
-
-    {/* ── Major horizontal roads ────────────────────────────────────── */}
-    <rect x="0" y="173" width="600" height="9" fill="#c9d4e0" />
-    <rect x="0" y="283" width="600" height="9" fill="#c9d4e0" />
-    <rect x="0" y="93"  width="600" height="5" fill="#cfdae7" />
-    <rect x="0" y="353" width="600" height="5" fill="#cfdae7" />
-
-    {/* ── Major vertical roads ──────────────────────────────────────── */}
-    <rect x="143" y="0" width="9" height="420" fill="#c9d4e0" />
-    <rect x="313" y="0" width="9" height="420" fill="#c9d4e0" />
-    <rect x="473" y="0" width="5" height="420" fill="#cfdae7" />
-    <rect x="63"  y="0" width="5" height="420" fill="#cfdae7" />
-
-    {/* ── Diagonal canal road ───────────────────────────────────────── */}
-    <path d="M0,370 Q150,300 300,225 Q430,175 600,145"
-      stroke="#c9d4e0" strokeWidth="7" fill="none" />
-
-    {/* ── Secondary streets ─────────────────────────────────────────── */}
-    <line x1="0" y1="233" x2="600" y2="233" stroke="#d4dce8" strokeWidth="3" />
-    <line x1="0" y1="133" x2="600" y2="133" stroke="#d4dce8" strokeWidth="3" />
-    <line x1="213" y1="0" x2="213" y2="420" stroke="#d4dce8" strokeWidth="3" />
-    <line x1="393" y1="0" x2="393" y2="420" stroke="#d4dce8" strokeWidth="3" />
-    <line x1="533" y1="0" x2="533" y2="420" stroke="#d4dce8" strokeWidth="3" />
-
-    {/* ── Road centre-line dashes (gives real-map feel) ─────────────── */}
-    <line x1="0" y1="178" x2="600" y2="178"
-      stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="10 7" />
-    <line x1="148" y1="0" x2="148" y2="420"
-      stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="10 7" />
-    <line x1="318" y1="0" x2="318" y2="420"
-      stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="10 7" />
-
-    {/* ── Restaurant pins ───────────────────────────────────────────── */}
-    {visibleRestaurants.map((r) => {
-      const { x, y } = toMapXY(r.lat, r.lng);
-      const s = getSentiment(r.sentiment);
-      const hovered = hoveredPin === r.id;
-
-      // Keep tooltip rect inside SVG bounds.
-      const tw = 118;
-      const tx = Math.min(Math.max(x - tw / 2, 4), 596 - tw);
-      // Flip tooltip below the pin if pin is near the top edge.
-      const ty = y < 72 ? y + 18 : y - 54;
-
-      return (
-        <g
-          key={r.id}
-          onMouseEnter={() => onPinHover(r.id)}
-          onMouseLeave={() => onPinHover(null)}
-          style={{ cursor: 'pointer' }}
-        >
-          {/* Soft shadow under pin */}
-          <ellipse cx={x} cy={y + 13} rx={5} ry={2.5} fill="rgba(0,0,0,0.18)" />
-
-          {/* Teardrop pin shape */}
-          <path
-            d={`M${x},${y + 11} C${x - 8},${y} ${x - 8},${y - 16} ${x},${y - 18} C${x + 8},${y - 16} ${x + 8},${y} ${x},${y + 11}Z`}
-            fill={hovered ? s.dot : '#2563eb'}
-            stroke={hovered ? s.textColor : '#1d4ed8'}
-            strokeWidth="1"
-          />
-
-          {/* White inner dot on pin */}
-          <circle cx={x} cy={y - 7} r="3.5" fill="rgba(255,255,255,0.92)" />
-
-          {/* Tooltip shown on hover */}
-          {hovered && (
-            <g>
-              <rect x={tx} y={ty} width={tw} height={32} rx="5" fill="rgba(15,23,42,0.93)" />
-              <text
-                x={tx + tw / 2} y={ty + 13}
-                textAnchor="middle" fill="white"
-                fontSize="10" fontFamily="Poppins, sans-serif" fontWeight="600"
-              >
-                {r.name.length > 17 ? r.name.slice(0, 15) + '…' : r.name}
-              </text>
-              <text
-                x={tx + tw / 2} y={ty + 25}
-                textAnchor="middle" fill={s.dot}
-                fontSize="9" fontFamily="Poppins, sans-serif"
-              >
-                {r.sentiment}% {s.label}
-              </text>
-            </g>
-          )}
-        </g>
-      );
-    })}
-  </svg>
-);
-
 // ─── RESTAURANT CARD ─────────────────────────────────────────────────────────
-// Displays one restaurant with image, sentiment badge, rating, and compare button.
 const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => {
   const s = getSentiment(r.sentiment);
   return (
@@ -173,7 +35,6 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
         borderRadius: '12px',
         overflow: 'hidden',
         minHeight: '286px',
-        // Shadow gets stronger and border turns blue when hovered.
         boxShadow: hovered ? '0 16px 34px rgba(37,99,235,0.18)' : '0 2px 10px rgba(15,23,42,0.08)',
         border: `1px solid ${hovered ? '#93c5fd' : '#e2e8f0'}`,
         transition: 'box-shadow 0.22s ease, border-color 0.22s ease, transform 0.22s ease',
@@ -183,7 +44,6 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
         transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
       }}
     >
-      {/* Restaurant image with overlay elements */}
       <div style={{ position: 'relative', height: '168px', flexShrink: 0 }}>
         <img
           src={r.image}
@@ -198,7 +58,6 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
           }}
         />
 
-        {/* Sentiment badge (top-left of image) */}
         <div style={{
           position: 'absolute', top: '10px', left: '10px',
           background: s.dot, color: '#ffffff',
@@ -207,7 +66,6 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
           display: 'flex', alignItems: 'center', gap: '5px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
         }}>
-          {/* Coloured dot */}
           <span style={{
             width: '7px', height: '7px', borderRadius: '50%',
             background: s.dot, display: 'inline-block', flexShrink: 0,
@@ -215,7 +73,6 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
           {r.sentiment}% {s.label}
         </div>
 
-        {/* Compare (+/✓) button (top-right of image) */}
         <button
           title={inCompare ? 'Remove from compare' : 'Add to compare'}
           onClick={(e) => { e.stopPropagation(); onToggleCompare(r.id); }}
@@ -235,9 +92,7 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
         </button>
       </div>
 
-      {/* Card info section */}
       <div style={{ padding: '10px 14px 11px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-        {/* Name + star rating row */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '2px' }}>
           <h3 style={{
             fontSize: '15px', fontWeight: '700', color: '#0f172a',
@@ -254,26 +109,29 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => 
           </div>
         </div>
 
-        {/* Cuisine type and price range */}
         <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 5px', lineHeight: 1.3 }}>
           {r.cuisine} - {r.priceRange}
         </p>
 
-        {/* Location and review count row */}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: '2px', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
-            {/* Location pin icon */}
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
               stroke="#94a3b8" strokeWidth="2" style={{ flexShrink: 0 }}>
               <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
               <circle cx="12" cy="9" r="2.5" />
             </svg>
-            <span style={{
-              fontSize: '11px', color: '#64748b',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {r.location.length > 24 ? r.location.slice(0, 22) + '…' : r.location}
-            </span>
+            <div style={{ minWidth: 0 }}>
+              <span style={{
+                fontSize: '11px', color: '#64748b',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                display: 'block'
+              }}>
+                {r.location.length > 24 ? r.location.slice(0, 22) + '…' : r.location}
+              </span>
+              {typeof r.distance === 'number' && (
+                <span style={{ fontSize: '11px', color: '#94a3b8' }}>{r.distance.toFixed(1)} km away</span>
+              )}
+            </div>
           </div>
           <span style={{ fontSize: '11px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
             ({r.reviews.toLocaleString()} reviews)
@@ -290,30 +148,39 @@ const CustomerDashboard = () => {
   const user = getStoredUser();
   const customerName = user?.firstName || user?.name || 'Customer';
 
-  // This controls whether the sidebar is visible or hidden.
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-  // Which sidebar item is currently selected.
   const [activeNav, setActiveNav] = useState('home');
-
-  // Text the user typed in the search bar.
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Currently selected sort option.
   const [sortBy, setSortBy] = useState('relevance');
-
-  // The restaurant id whose pin is being hovered on the map or card.
-  // Shared between the map and the cards so they highlight together.
   const [hoveredPin, setHoveredPin] = useState(null);
-
-  // List of restaurant ids the user added to compare.
   const [compareList, setCompareList] = useState([]);
+  const [mapInstance, setMapInstance] = useState(null);
+  
+  // Geolocation and nearby filtering
+  const [userLocation, setUserLocation] = useState(null);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [nearbyRadiusKm, setNearbyRadiusKm] = useState(10);
+  
+  // Searched place marker and details
+  const [selectedSearchPlace, setSelectedSearchPlace] = useState(null);
+  const [selectedPlaceDetails, setSelectedPlaceDetails] = useState(null);
 
-  // Filter and sort restaurants whenever searchQuery or sortBy changes.
+  // Compute distance (km) between two lat/lng points using Haversine formula
+  const distanceKm = (lat1, lon1, lat2, lon2) => {
+    const toRad = (v) => (v * Math.PI) / 180;
+    const R = 6371; // Earth radius km
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
   const filteredRestaurants = useMemo(() => {
     let list = [...restaurants];
 
-    // If the user typed something, keep only matching restaurants.
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(
@@ -324,15 +191,19 @@ const CustomerDashboard = () => {
       );
     }
 
-    // Sort by the selected option.
+    if (userLocation) {
+      list = list.map((r) => ({ ...r, distance: distanceKm(userLocation.lat, userLocation.lng, r.lat, r.lng) }));
+      list = list.filter((r) => r.distance <= nearbyRadiusKm);
+    }
+
     if (sortBy === 'rating')    list.sort((a, b) => b.rating - a.rating);
     if (sortBy === 'sentiment') list.sort((a, b) => b.sentiment - a.sentiment);
     if (sortBy === 'reviews')   list.sort((a, b) => b.reviews - a.reviews);
+    if (sortBy === 'distance' && userLocation) list.sort((a, b) => (a.distance || 0) - (b.distance || 0));
 
     return list;
-  }, [searchQuery, sortBy]);
+  }, [searchQuery, sortBy, userLocation, nearbyRadiusKm]);
 
-  // Add or remove a restaurant from the compare list.
   const toggleCompare = (id) => {
     setCompareList((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -349,8 +220,27 @@ const CustomerDashboard = () => {
     if (id === 'settings') navigate('/settings');
   };
 
+  // Auto-fetch user location on dashboard mount
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      console.log('Geolocation not supported');
+      return;
+    }
+    setLocationLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocationLoading(false);
+      },
+      (err) => {
+        console.log('Geolocation error:', err.message);
+        setLocationLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }, []);
+
   return (
-    // Full viewport layout — sidebar on left, main on right, nothing overflows.
     <div style={{
       display: 'flex',
       height: '100vh',
@@ -423,30 +313,28 @@ const CustomerDashboard = () => {
           </div>
 
           {/* Search + Filter row */}
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', width: '100%' }}>
+            
+            {/* Autocomplete search with Google Places */}
+            <AutocompleteSearch 
+              mapInstance={mapInstance} 
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              onPlaceSelected={(placeData) => {
+                console.log("Selected Location Details:", placeData);
+                const shortName = placeData.name.split(',')[0];
+                setSearchQuery(shortName);
+                // Set marker pin for the searched place
+                setSelectedSearchPlace({
+                  lat: placeData.lat,
+                  lng: placeData.lng,
+                  name: placeData.name
+                });
+                // Store full place details for card display
+                setSelectedPlaceDetails(placeData);
+              }} 
+            />
 
-            {/* Text input with search icon inside */}
-            <div style={{
-              flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
-              background: '#f8fafc', border: '1.5px solid #e2e8f0',
-              borderRadius: '10px', padding: '0 14px',
-            }}>
-              <SearchBarIcon />
-              <input
-                type="text"
-                placeholder="Search restaurants, cuisines, or dishes..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  flex: 1, border: 'none', background: 'transparent',
-                  fontSize: '13px', color: '#1e293b',
-                  fontFamily: "'Poppins', sans-serif",
-                  padding: '11px 0', outline: 'none',
-                }}
-              />
-            </div>
-
-            {/* Blue search button */}
             <button style={{
               background: '#2563eb', color: '#fff',
               border: 'none', borderRadius: '10px',
@@ -454,11 +342,57 @@ const CustomerDashboard = () => {
               cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
               fontFamily: "'Poppins', sans-serif", flexShrink: 0,
             }}>
-              <SearchBarIcon color="#fff" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
               Search
             </button>
 
-            {/* Filter icon button */}
+            {/* Use my location button */}
+            <button
+              title={userLocation ? `📍 Your location: ${userLocation.lat.toFixed(3)}°, ${userLocation.lng.toFixed(3)}°` : "Show nearby restaurants"}
+              onClick={() => {
+                setLocationLoading(true);
+                if (!navigator.geolocation) {
+                  alert('Geolocation not supported by this browser');
+                  setLocationLoading(false);
+                  return;
+                }
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                    setLocationLoading(false);
+                  },
+                  (err) => {
+                    alert('Unable to determine location: ' + (err.message || err.code));
+                    setLocationLoading(false);
+                  },
+                  { enableHighAccuracy: true, timeout: 10000 }
+                );
+              }}
+              style={{
+                background: userLocation ? '#dbeafe' : (locationLoading ? '#e6f0ff' : '#f8fafc'),
+                border: userLocation ? '1.5px solid #0284c7' : '1.5px solid #e2e8f0',
+                borderRadius: '10px', padding: '10px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0,
+                transition: 'all 0.3s ease',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill={userLocation ? '#0284c7' : '#2563eb'} stroke="none">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a7 7 0 0 0 0-6" fill="none" stroke={userLocation ? '#0284c7' : '#2563eb'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M4.6 9a7 7 0 0 0 0 6" fill="none" stroke={userLocation ? '#0284c7' : '#2563eb'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <span style={{
+                marginLeft: '8px',
+                color: userLocation ? '#0284c7' : '#2563eb',
+                fontWeight: 700, fontSize: '13px',
+              }}>
+                {locationLoading ? 'Locating...' : (userLocation ? '✓ Located' : 'My Location')}
+              </span>
+            </button>
+
             <button style={{
               background: '#f8fafc', border: '1.5px solid #e2e8f0',
               borderRadius: '10px', padding: '10px 12px',
@@ -469,10 +403,10 @@ const CustomerDashboard = () => {
           </div>
         </header>
 
-        {/* Body: Map on the left, restaurant list on the right */}
+        {/* Body: Google Map on left, restaurant list on right */}
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0, justifyContent: 'space-between' }}>
 
-          {/* ── MAP SECTION ────────────────────────── */}
+          {/* ── GOOGLE MAP SECTION ────────────────────────── */}
           <div style={{
             flex: '0 0 52%',
             borderRight: '1px solid #e2e8f0',
@@ -480,32 +414,35 @@ const CustomerDashboard = () => {
             position: 'relative',
             overflow: 'hidden',
             padding: '16px',
+            display: 'flex',
+            flexDirection: 'column'
           }}>
             <div style={{
               position: 'relative',
               width: '100%',
-              height: '50%',
-              minHeight: '280px',
-              maxHeight: '340px',
-              borderRadius: '28px',
+              height: '100%', 
+              borderRadius: '24px',
               overflow: 'hidden',
               background: '#e5edf5',
-              boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.12)',
+              boxShadow: '0 4px 20px rgba(15,23,42,0.08)',
             }}>
-              {/* SVG map fills the shorter rounded map box */}
-              <MapView
-                visibleRestaurants={filteredRestaurants}
+              {/* Live Google Map component */}
+              <GoogleMapView
+                restaurants={filteredRestaurants}
                 hoveredPin={hoveredPin}
-                onPinHover={setHoveredPin}
+                onMapLoad={setMapInstance}
+                selectedSearchPlace={selectedSearchPlace}
+                userLocation={userLocation}
               />
 
-              {/* AI Sentiment legend in the bottom-left corner of the map */}
+              {/* AI Sentiment legend overlay */}
               <div style={{
-                position: 'absolute', bottom: '16px', left: '16px',
+                position: 'absolute', bottom: '24px', left: '24px',
                 background: 'rgba(255,255,255,0.97)',
                 borderRadius: '14px', padding: '10px 14px',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.10)',
+                boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
                 fontFamily: "'Poppins', sans-serif",
+                zIndex: 10 
               }}>
                 <p style={{ fontWeight: '600', color: '#374151', margin: '0 0 7px', fontSize: '11px' }}>
                   AI Sentiment
@@ -526,8 +463,6 @@ const CustomerDashboard = () => {
 
           {/* ── RESTAURANT LIST SECTION ────────────── */}
           <div style={{ flex: '0 0 45%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-
-            {/* Count + sort bar */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 18px',
@@ -535,7 +470,9 @@ const CustomerDashboard = () => {
               flexShrink: 0,
             }}>
               <span style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
-                <span style={{ color: '#2563eb', fontWeight: '700' }}>{filteredRestaurants.length}</span> restaurants found
+                <span style={{ color: '#2563eb', fontWeight: '700' }}>
+                  {(selectedPlaceDetails ? 1 : 0) + filteredRestaurants.length}
+                </span> restaurants found
               </span>
               <select
                 value={sortBy}
@@ -551,18 +488,290 @@ const CustomerDashboard = () => {
                 <option value="rating">Sort by: Rating</option>
                 <option value="sentiment">Sort by: Sentiment</option>
                 <option value="reviews">Sort by: Reviews</option>
+                <option value="distance">Sort by: Distance</option>
               </select>
             </div>
 
-            {/* Scrollable 2-column card grid */}
             <div style={{
               flex: 1, overflowY: 'auto',
               padding: '14px', display: 'grid',
               gridTemplateColumns: '1fr 1fr', gap: '12px',
               alignContent: 'start',
             }}>
-              {filteredRestaurants.length === 0 ? (
-                // Empty-state message when search matches nothing.
+              {/* Display searched place with FINAL CARD DESIGN */}
+              {selectedPlaceDetails && (
+                <div
+                  style={{
+                    gridColumn: '1 / -1',
+                    background: '#fff',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    boxShadow: '0 8px 24px rgba(37,99,235,0.16)',
+                    border: '2px solid #93c5fd',
+                    transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    animation: 'searchCardPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    marginBottom: '12px',
+                  }}
+                >
+                  <style>{`
+                    @keyframes searchCardPop {
+                      0% {
+                        transform: scale(0.95) translateY(10px);
+                        opacity: 0.8;
+                        border-color: #1f2937;
+                      }
+                      50% {
+                        border-color: #3b82f6;
+                      }
+                      100% {
+                        transform: scale(1) translateY(0);
+                        opacity: 1;
+                        border-color: #93c5fd;
+                      }
+                    }
+                  `}</style>
+
+                  {/* Image Banner */}
+                  <div style={{
+                    position: 'relative',
+                    height: '180px',
+                    background: selectedPlaceDetails.photos && selectedPlaceDetails.photos.length > 0
+                      ? `url('${selectedPlaceDetails.photos[0].getUrl()}')`
+                      : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    overflow: 'hidden',
+                  }}>
+                    {/* AI Score Space & Badge */}
+                    <div style={{
+                      position: 'absolute', top: '12px', left: '12px',
+                      background: 'rgba(255, 255, 255, 0.95)',
+                      backdropFilter: 'blur(10px)',
+                      borderRadius: '10px', padding: '6px 12px',
+                      fontSize: '11px', fontWeight: '700',
+                      color: '#0f172a',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                    }}>
+                      <span style={{ fontSize: '16px' }}>⭐</span>
+                      <span>AI Score: Fetching...</span>
+                    </div>
+
+                    {/* Quick Buttons */}
+                    <div style={{
+                      position: 'absolute', top: '12px', right: '12px',
+                      display: 'flex', gap: '8px',
+                    }}>
+                      {selectedPlaceDetails.phoneNumber && (
+                        <a href={`tel:${selectedPlaceDetails.phoneNumber}`}
+                          style={{
+                            width: '36px', height: '36px', borderRadius: '50%',
+                            background: 'rgba(255,255,255,0.95)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '16px', cursor: 'pointer',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                            textDecoration: 'none',
+                            transition: 'transform 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => e.target.style.transform = 'scale(1.1)'}
+                          onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
+                          title="Call"
+                        >
+                          📞
+                        </a>
+                      )}
+                      {selectedPlaceDetails.website && (
+                        <a href={selectedPlaceDetails.website} target="_blank" rel="noopener noreferrer"
+                          style={{
+                            width: '36px', height: '36px', borderRadius: '50%',
+                            background: 'rgba(255,255,255,0.95)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '16px', cursor: 'pointer',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                            textDecoration: 'none',
+                            transition: 'transform 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => e.target.style.transform = 'scale(1.1)'}
+                          onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
+                          title="Website"
+                        >
+                          🌐
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div style={{ padding: '14px' }}>
+
+                    {/* ─ Basic Identity Section ─ */}
+                    <div style={{ marginBottom: '10px' }}>
+                      <h2 style={{
+                        fontSize: '16px', fontWeight: '800', color: '#0f172a',
+                        margin: '0 0 4px', lineHeight: 1.2,
+                      }}>
+                        {selectedPlaceDetails.name}
+                      </h2>
+                      <p style={{
+                        fontSize: '12px', color: '#64748b', margin: '0 0 6px',
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                      }}>
+                        🏷️ {selectedPlaceDetails.types && selectedPlaceDetails.types.length > 0
+                          ? selectedPlaceDetails.types[0].replace(/_/g, ' ')
+                          : 'Restaurant'} • {selectedPlaceDetails.priceLevel ? '$'.repeat(selectedPlaceDetails.priceLevel.length) : 'N/A'}
+                      </p>
+                      <p style={{
+                        fontSize: '11px', color: '#94a3b8', margin: 0,
+                        display: 'flex', alignItems: 'center', gap: '4px',
+                      }}>
+                        📍 {selectedPlaceDetails.address && selectedPlaceDetails.address.length > 45
+                          ? selectedPlaceDetails.address.slice(0, 43) + '…'
+                          : selectedPlaceDetails.address}
+                      </p>
+                    </div>
+
+                    {/* ─ Rating & Distance Row ─ */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      padding: '10px 0', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
+                      marginBottom: '10px', justifyContent: 'space-between',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '16px' }}>⭐</span>
+                        <div>
+                          <p style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a', margin: 0 }}>
+                            {selectedPlaceDetails.rating ? selectedPlaceDetails.rating.toFixed(1) : 'N/A'} / 5
+                          </p>
+                          <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>
+                            {selectedPlaceDetails.userRatingsTotal || 0} reviews
+                          </p>
+                        </div>
+                      </div>
+
+                      {userLocation && selectedPlaceDetails.lat && selectedPlaceDetails.lng && (
+                        <div style={{ textAlign: 'right' }}>
+                          <p style={{
+                            fontSize: '13px', fontWeight: '700', color: '#2563eb', margin: 0
+                          }}>
+                            {distanceKm(userLocation.lat, userLocation.lng, selectedPlaceDetails.lat, selectedPlaceDetails.lng).toFixed(1)} km
+                          </p>
+                          <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>
+                            from you
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ─ Sentiment Summary (CORE FYP FEATURE) ─ */}
+                    <div style={{
+                      padding: '10px', background: '#f0f9ff', borderRadius: '10px',
+                      marginBottom: '10px', border: '1px solid #bfdbfe',
+                    }}>
+                      <p style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: '0 0 8px' }}>
+                        😊 AI Sentiment Analysis
+                      </p>
+                      <div style={{
+                        display: 'flex', gap: '8px', flexWrap: 'wrap',
+                      }}>
+                        <span style={{
+                          fontSize: '11px', fontWeight: '600',
+                          padding: '4px 10px', borderRadius: '6px',
+                          background: '#dcfce7', color: '#15803d',
+                        }}>
+                          😊 75% Positive
+                        </span>
+                        <span style={{
+                          fontSize: '11px', fontWeight: '600',
+                          padding: '4px 10px', borderRadius: '6px',
+                          background: '#fef3c7', color: '#b45309',
+                        }}>
+                          😐 18% Neutral
+                        </span>
+                        <span style={{
+                          fontSize: '11px', fontWeight: '600',
+                          padding: '4px 10px', borderRadius: '6px',
+                          background: '#fee2e2', color: '#dc2626',
+                        }}>
+                          😡 7% Negative
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ─ Quick Insight Tag ─ */}
+                    <div style={{
+                      padding: '10px', background: '#f8f6ff', borderRadius: '10px',
+                      border: '1px solid #e9d5ff', marginBottom: '10px',
+                    }}>
+                      <p style={{
+                        fontSize: '11px', color: '#6b21a8', fontStyle: 'italic',
+                        margin: 0, lineHeight: 1.4,
+                      }}>
+                        💡 "Customers love the food taste but complain about slow service and waiting times"
+                      </p>
+                    </div>
+
+                    {/* ─ Action Buttons ─ */}
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px',
+                    }}>
+                      <button
+                        onClick={() => alert('View Details - Coming Soon')}
+                        style={{
+                          padding: '8px 10px', fontSize: '11px', fontWeight: '700',
+                          borderRadius: '8px', border: 'none',
+                          background: '#2563eb', color: '#fff',
+                          cursor: 'pointer', transition: 'all 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = '#1d4ed8'}
+                        onMouseLeave={(e) => e.target.style.background = '#2563eb'}
+                      >
+                        View Details
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (selectedPlaceDetails.placeId) {
+                            const newList = compareList.includes(selectedPlaceDetails.placeId)
+                              ? compareList.filter(x => x !== selectedPlaceDetails.placeId)
+                              : [...compareList, selectedPlaceDetails.placeId];
+                            setCompareList(newList);
+                          }
+                        }}
+                        style={{
+                          padding: '8px 10px', fontSize: '11px', fontWeight: '700',
+                          borderRadius: '8px', border: '1.5px solid #2563eb',
+                          background: compareList.includes(selectedPlaceDetails.placeId) ? '#2563eb' : '#fff',
+                          color: compareList.includes(selectedPlaceDetails.placeId) ? '#fff' : '#2563eb',
+                          cursor: 'pointer', transition: 'all 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.background = compareList.includes(selectedPlaceDetails.placeId) ? '#1d4ed8' : '#f0f9ff';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.background = compareList.includes(selectedPlaceDetails.placeId) ? '#2563eb' : '#fff';
+                        }}
+                      >
+                        🔀 Compare
+                      </button>
+
+                      <button
+                        style={{
+                          padding: '8px 10px', fontSize: '11px', fontWeight: '700',
+                          borderRadius: '8px', border: '1.5px solid #ec4899',
+                          background: '#fff', color: '#ec4899',
+                          cursor: 'pointer', transition: 'all 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = '#fce7f3'}
+                        onMouseLeave={(e) => e.target.style.background = '#fff'}
+                      >
+                        ❤️ Favorite
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {filteredRestaurants.length === 0 && !selectedPlaceDetails ? (
                 <div style={{
                   gridColumn: '1 / -1', textAlign: 'center',
                   color: '#94a3b8', padding: '48px 0', fontSize: '14px',

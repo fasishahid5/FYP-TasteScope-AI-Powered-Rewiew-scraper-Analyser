@@ -9,6 +9,154 @@
   box-sizing: border-box;
 }
 
+/* ============================================================================
+   DARK MODE ROOT STYLES
+   ============================================================================ */
+:root {
+  /* Light Mode (Default) */
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 24px rgba(15, 23, 42, 0.12);
+}
+
+html.dark {
+  /* Dark Mode */
+  --bg-primary: #071127;
+  --bg-secondary: #0f1724;
+  --bg-tertiary: #071827;
+  --text-primary: #e6eef8;
+  --text-secondary: #94a3b8;
+  --border-color: #243249;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* ============================================================================
+   GLOBAL DARK MODE BODY & TEXT STYLES
+   ============================================================================ */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ============================================================================
+   DARK MODE CLASS-BASED OVERRIDES (Comprehensive)
+   ============================================================================ */
+
+/* Background overrides */
+.dark body,
+.dark {
+  background-color: #071127 !important;
+}
+
+.dark .bg-white { background-color: #0f1724 !important; }
+.dark .bg-\[#ffffff\] { background-color: #0f1724 !important; }
+.dark .bg-\[#f8fafc\] { background-color: #071127 !important; }
+.dark .bg-\[#f1f5f9\] { background-color: #071827 !important; }
+.dark .bg-\[#fdf2f8\] { background-color: #2b1220 !important; }
+.dark .bg-\[#eff6ff\] { background-color: #07182a !important; }
+.dark .bg-\[#f0fdf4\] { background-color: #09221a !important; }
+.dark .bg-\[#fffbeb\] { background-color: #2a2414 !important; }
+.dark .bg-\[#fff1f2\] { background-color: #2a1417 !important; }
+.dark .bg-slate-50 { background-color: #071127 !important; }
+.dark .bg-slate-100 { background-color: #0f1724 !important; }
+.dark .bg-gray-50 { background-color: #071127 !important; }
+
+/* Text color overrides */
+.dark .text-slate-900 { color: #e6eef8 !important; }
+.dark .text-slate-800 { color: #e0e8f5 !important; }
+.dark .text-\[#0f172a\] { color: #e6eef8 !important; }
+.dark .text-\[#1e293b\] { color: #e6eef8 !important; }
+.dark .text-\[#64748b\] { color: #94a3b8 !important; }
+.dark .text-\[#475569\] { color: #a5b4c4 !important; }
+.dark .text-gray-900 { color: #e6eef8 !important; }
+.dark .text-gray-700 { color: #cbd5e1 !important; }
+
+/* Border color overrides */
+.dark .border { border-color: #243249 !important; }
+.dark .border-\[#eef2f6\] { border-color: #243249 !important; }
+.dark .border-\[#e2e8f0\] { border-color: #243249 !important; }
+.dark .border-\[#dbe3ee\] { border-color: #1e2735 !important; }
+.dark .border-slate-200 { border-color: #243249 !important; }
+.dark .border-slate-300 { border-color: #2f3d54 !important; }
+
+/* Shadow overrides */
+.dark .shadow { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important; }
+.dark .shadow-sm { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25) !important; }
+.dark .shadow-md { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important; }
+.dark .shadow-lg { box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3) !important; }
+
+/* Card and container styles */
+.dark .rounded-lg { background-color: #0f1724 !important; border-color: #243249 !important; }
+.dark .rounded-2xl { background-color: #0f1724 !important; border-color: #243249 !important; }
+
+/* Input field overrides */
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #071827 !important;
+  color: #e6eef8 !important;
+  border-color: #243249 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Button styles for dark mode */
+.dark button {
+  color: inherit;
+}
+
+.dark button:not([style*="background"]) {
+  background-color: #0f1724 !important;
+  color: #e6eef8 !important;
+  border-color: #243249 !important;
+}
+
+/* Specific component dark overrides */
+.dark .bg-\[#f3f4f6\] { background-color: #1e2735 !important; }
+
+/* Dropdown and modal backgrounds */
+.dark > div,
+.dark [role="dialog"],
+.dark [role="menu"],
+.dark [role="listbox"] {
+  background-color: #0f1724 !important;
+  border-color: #243249 !important;
+}
+
+/* Scrollbar styling for dark mode */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #071827;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #243249;
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* ============================================================================
+   ANIMATIONS & TRANSITIONS
+   ============================================================================ */
 @keyframes fadeInScale {
   from {
     opacity: 0;
@@ -33,6 +181,10 @@
   transform: translateY(0);
 }
 
+/* ============================================================================
+   BROWSER COMPATIBILITY
+   ============================================================================ */
+
 /* 
   Browser Fix: Edge and Chrome add their own "reveal password" eye icon
   inside password fields. This clashes with our custom show/hide button.
@@ -41,4 +193,26 @@
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
   display: none;
+}
+
+/* ============================================================================
+   RTL SUPPORT (Right-to-Left for Arabic, Hebrew, Farsi, etc.)
+   ============================================================================ */
+[dir="rtl"] {
+  direction: rtl;
+  text-align: right;
+}
+
+[dir="rtl"] input,
+[dir="rtl"] textarea {
+  text-align: right;
+}
+
+/* ============================================================================
+   SMOOTH TRANSITIONS FOR THEME CHANGES
+   ============================================================================ */
+* {
+  transition-property: background-color, border-color, color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
 }
