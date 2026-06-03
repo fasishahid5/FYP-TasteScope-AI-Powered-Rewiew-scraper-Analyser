@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import GoogleMapView from '../components/GoogleMapView';
@@ -24,10 +24,11 @@ const getSentiment = (score) => {
 };
 
 // ─── RESTAURANT CARD ─────────────────────────────────────────────────────────
-const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare }) => {
+const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare, onCardClick }) => {
   const s = getSentiment(r.sentiment);
   return (
     <div
+      onClick={() => onCardClick && onCardClick(r)}
       onMouseEnter={() => onHover(r.id)}
       onMouseLeave={() => onHover(null)}
       style={{
@@ -153,17 +154,44 @@ const CustomerDashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('relevance');
   const [hoveredPin, setHoveredPin] = useState(null);
-  const [compareList, setCompareList] = useState([]);
+  const [compareList, setCompareList] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ts_compareList') || '[]'); } catch { return []; }
+  });
   const [mapInstance, setMapInstance] = useState(null);
   
   // Geolocation and nearby filtering
   const [userLocation, setUserLocation] = useState(null);
   const [locationLoading, setLocationLoading] = useState(false);
-  const [nearbyRadiusKm, setNearbyRadiusKm] = useState(10);
-  
+
+  // Real nearby restaurants fetched from Google Places
+  const [nearbyRestaurants, setNearbyRestaurants] = useState([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+
   // Searched place marker and details
   const [selectedSearchPlace, setSelectedSearchPlace] = useState(null);
   const [selectedPlaceDetails, setSelectedPlaceDetails] = useState(null);
+
+  // Ref for scrolling the list panel to top when a card is opened
+  const listPanelRef = useRef(null);
+
+  // Fallback images for restaurants that have no Google photo
+  const FALLBACK_IMAGES = [
+    'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1559339352-11d035aa65de?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1509722747041-616f39b57569?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1626645738196-c2a7c87a8f58?w=800&h=600&fit=crop',
+    'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&h=600&fit=crop',
+  ];
+
+  // Deterministic mock sentiment from place_id (so it doesn't jump on re-renders)
+  const mockSentiment = (placeId) => {
+    let h = 0;
+    for (let i = 0; i < placeId.length; i++) h = (Math.imul(31, h) + placeId.charCodeAt(i)) | 0;
+    return 58 + Math.abs(h % 38); // 58–95
+  };
 
   // Compute distance (km) between two lat/lng points using Haversine formula
   const distanceKm = (lat1, lon1, lat2, lon2) => {
@@ -178,8 +206,72 @@ const CustomerDashboard = () => {
     return R * c;
   };
 
+  // When mapInstance + userLocation are both ready, fetch real nearby restaurants
+  useEffect(() => {
+    if (!mapInstance || !userLocation || !window.google?.maps?.places) return;
+    setNearbyLoading(true);
+    const service = new window.google.maps.places.PlacesService(mapInstance);
+    service.nearbySearch(
+      {
+        location: { lat: userLocation.lat, lng: userLocation.lng },
+        radius: 5000,
+        type: 'restaurant',
+      },
+      (results, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && results?.length) {
+          const mapped = results.map((place, idx) => {
+            const lat = place.geometry.location.lat();
+            const lng = place.geometry.location.lng();
+            const sentiment = mockSentiment(place.place_id);
+            let photo = null;
+            try { photo = place.photos?.[0]?.getUrl({ maxWidth: 800, maxHeight: 600 }); } catch (_) {}
+            return {
+              id: place.place_id,
+              name: place.name,
+              location: place.vicinity || '',
+              rating: place.rating || 4.0,
+              sentiment,
+              reviews: place.user_ratings_total || (300 + idx * 47),
+              cuisine: (place.types?.find(t => !['establishment','point_of_interest','food'].includes(t)) || 'restaurant').replace(/_/g, ' '),
+              priceRange: place.price_level ? '$'.repeat(place.price_level) : '$$',
+              waitTime: 10 + (idx % 5) * 5,
+              waitTimeLabel: `${10 + (idx % 5) * 5}–${15 + (idx % 5) * 5} min`,
+              image: photo || FALLBACK_IMAGES[idx % FALLBACK_IMAGES.length],
+              lat,
+              lng,
+              distance: distanceKm(userLocation.lat, userLocation.lng, lat, lng),
+            };
+          });
+          // Sort nearest first by default
+          mapped.sort((a, b) => a.distance - b.distance);
+          setNearbyRestaurants(mapped);
+        } else {
+          // Places API failed or no results — keep showing mock data
+          setNearbyRestaurants([]);
+        }
+        setNearbyLoading(false);
+      }
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapInstance, userLocation]);
+
+  // Source: use real nearby results when available, fall back to mock data
+  const activeRestaurants = nearbyRestaurants.length > 0 ? nearbyRestaurants : restaurants;
+
+  // Persist compareList to localStorage so CompareDashboard can read it
+  useEffect(() => {
+    try { localStorage.setItem('ts_compareList', JSON.stringify(compareList)); } catch {}
+  }, [compareList]);
+
+  // Persist restaurant pool to localStorage so CompareDashboard can look up full objects
+  useEffect(() => {
+    if (activeRestaurants.length > 0) {
+      try { localStorage.setItem('ts_restaurantPool', JSON.stringify(activeRestaurants)); } catch {}
+    }
+  }, [activeRestaurants]);
+
   const filteredRestaurants = useMemo(() => {
-    let list = [...restaurants];
+    let list = [...activeRestaurants];
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -191,9 +283,12 @@ const CustomerDashboard = () => {
       );
     }
 
+    // Ensure distance is always attached when userLocation is known
     if (userLocation) {
-      list = list.map((r) => ({ ...r, distance: distanceKm(userLocation.lat, userLocation.lng, r.lat, r.lng) }));
-      list = list.filter((r) => r.distance <= nearbyRadiusKm);
+      list = list.map((r) => ({
+        ...r,
+        distance: r.distance ?? distanceKm(userLocation.lat, userLocation.lng, r.lat, r.lng),
+      }));
     }
 
     if (sortBy === 'rating')    list.sort((a, b) => b.rating - a.rating);
@@ -202,12 +297,33 @@ const CustomerDashboard = () => {
     if (sortBy === 'distance' && userLocation) list.sort((a, b) => (a.distance || 0) - (b.distance || 0));
 
     return list;
-  }, [searchQuery, sortBy, userLocation, nearbyRadiusKm]);
+  }, [searchQuery, sortBy, userLocation, activeRestaurants]);
 
   const toggleCompare = (id) => {
     setCompareList((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+  };
+
+  // Clicking a nearby restaurant card opens the same AI review card used by manual search
+  const handleCardClick = (r) => {
+    setSelectedPlaceDetails({
+      name: r.name,
+      image: r.image,
+      photos: null,
+      rating: r.rating,
+      userRatingsTotal: r.reviews,
+      types: [r.cuisine.replace(/ /g, '_')],
+      priceLevel: r.priceRange,
+      address: r.location,
+      lat: r.lat,
+      lng: r.lng,
+      phoneNumber: null,
+      website: null,
+      placeId: String(r.id),
+    });
+    setSelectedSearchPlace({ lat: r.lat, lng: r.lng, name: r.name });
+    if (listPanelRef.current) listPanelRef.current.scrollTop = 0;
   };
 
   const handleSidebarNavClick = (id) => {
@@ -230,6 +346,7 @@ const CustomerDashboard = () => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setSortBy('distance'); // auto-sort nearest restaurants
         setLocationLoading(false);
       },
       (err) => {
@@ -363,6 +480,7 @@ const CustomerDashboard = () => {
                 navigator.geolocation.getCurrentPosition(
                   (pos) => {
                     setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                    setSortBy('distance'); // auto-sort nearest when re-located
                     setLocationLoading(false);
                   },
                   (err) => {
@@ -470,9 +588,13 @@ const CustomerDashboard = () => {
               flexShrink: 0,
             }}>
               <span style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
-                <span style={{ color: '#2563eb', fontWeight: '700' }}>
-                  {(selectedPlaceDetails ? 1 : 0) + filteredRestaurants.length}
-                </span> restaurants found
+                {nearbyLoading ? (
+                  <span style={{ color: '#94a3b8' }}>Finding nearby restaurants…</span>
+                ) : (
+                  <><span style={{ color: '#2563eb', fontWeight: '700' }}>
+                    {(selectedPlaceDetails ? 1 : 0) + filteredRestaurants.length}
+                  </span> {nearbyRestaurants.length > 0 ? 'nearby restaurants' : 'restaurants found'}</>
+                )}
               </span>
               <select
                 value={sortBy}
@@ -492,7 +614,9 @@ const CustomerDashboard = () => {
               </select>
             </div>
 
-            <div style={{
+            <div
+              ref={listPanelRef}
+              style={{
               flex: 1, overflowY: 'auto',
               padding: '14px', display: 'grid',
               gridTemplateColumns: '1fr 1fr', gap: '12px',
@@ -505,38 +629,22 @@ const CustomerDashboard = () => {
                     gridColumn: '1 / -1',
                     background: '#fff',
                     borderRadius: '12px',
-                    overflow: 'hidden',
+                    overflow: 'visible',
                     boxShadow: '0 8px 24px rgba(37,99,235,0.16)',
                     border: '2px solid #93c5fd',
-                    transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                    animation: 'searchCardPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
                     marginBottom: '12px',
                   }}
                 >
-                  <style>{`
-                    @keyframes searchCardPop {
-                      0% {
-                        transform: scale(0.95) translateY(10px);
-                        opacity: 0.8;
-                        border-color: #1f2937;
-                      }
-                      50% {
-                        border-color: #3b82f6;
-                      }
-                      100% {
-                        transform: scale(1) translateY(0);
-                        opacity: 1;
-                        border-color: #93c5fd;
-                      }
-                    }
-                  `}</style>
-
                   {/* Image Banner */}
                   <div style={{
                     position: 'relative',
                     height: '180px',
+                    borderRadius: '10px 10px 0 0',
                     background: selectedPlaceDetails.photos && selectedPlaceDetails.photos.length > 0
                       ? `url('${selectedPlaceDetails.photos[0].getUrl()}')`
+                      : selectedPlaceDetails.image
+                      ? `url('${selectedPlaceDetails.image}')`
                       : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
@@ -602,7 +710,7 @@ const CustomerDashboard = () => {
                   </div>
 
                   {/* Content */}
-                  <div style={{ padding: '14px' }}>
+                  <div style={{ padding: '14px', borderRadius: '0 0 10px 10px', overflow: 'hidden' }}>
 
                     {/* ─ Basic Identity Section ─ */}
                     <div style={{ marginBottom: '10px' }}>
@@ -787,6 +895,7 @@ const CustomerDashboard = () => {
                     onHover={setHoveredPin}
                     inCompare={compareList.includes(r.id)}
                     onToggleCompare={toggleCompare}
+                    onCardClick={handleCardClick}
                   />
                 ))
               )}

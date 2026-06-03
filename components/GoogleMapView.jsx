@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { GoogleMap, useJsApiLoader, MarkerF } from "@react-google-maps/api";
 
 const containerStyle = {
@@ -18,10 +18,26 @@ function GoogleMapView({ restaurants, hoveredPin, onMapLoad, selectedSearchPlace
     libraries: ["places"], 
   });
 
+  const mapRef = useRef(null);
+
+  // Re-center and zoom to user's location whenever it changes
+  useEffect(() => {
+    if (mapRef.current && userLocation) {
+      mapRef.current.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+      mapRef.current.setZoom(13);
+    }
+  }, [userLocation]);
+
   // Pass the map instance up to the parent component when it readies
   const onLoad = useCallback((map) => {
+    mapRef.current = map;
     if (onMapLoad) onMapLoad(map);
-  }, [onMapLoad]);
+    // If we already have user location by the time the map loads, center on it
+    if (userLocation) {
+      map.panTo({ lat: userLocation.lat, lng: userLocation.lng });
+      map.setZoom(13);
+    }
+  }, [onMapLoad, userLocation]);
 
   if (!isLoaded) return <div className="p-4 text-center font-semibold text-gray-500">Loading Maps...</div>;
 
