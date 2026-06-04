@@ -34,6 +34,7 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/owner', require('./routes/owner'));
 app.use('/api/business', require('./routes/business'));
 app.use('/api/reviews', require('./routes/reviews'));
+app.use('/api/sentiment', require('./routes/sentiment'));
 
 // Basic route
 app.get('/', (req, res) => {

@@ -16,11 +16,25 @@ const FilterIcon = () => (
   </svg>
 );
 
-// ─── SENTIMENT HELPER ────────────────────────────────────────────────────────
+// ─── SENTIMENT HELPERS ───────────────────────────────────────────────────────
 const getSentiment = (score) => {
   if (score >= 80) return { label: 'Positive', textColor: '#15803d', bg: '#dcfce7', dot: '#22c55e' };
   if (score >= 60) return { label: 'Neutral',  textColor: '#b45309', bg: '#fef3c7', dot: '#f59e0b' };
   return               { label: 'Negative', textColor: '#dc2626', bg: '#fee2e2', dot: '#ef4444' };
+};
+
+// Weighted AI score: positive is primary, neutral partial, negative penalises
+// Scale: 0–100. Grade thresholds: A≥85, B≥70, C≥55, D≥40, F<40
+const calcAIScore = (pos = 0, neu = 0, neg = 0) => {
+  const raw = Math.round(pos * 1.0 + neu * 0.4 - neg * 0.5);
+  return Math.max(0, Math.min(100, raw));
+};
+const getGrade = (score) => {
+  if (score >= 85) return { grade: 'A', label: 'Excellent',  color: '#15803d', bg: '#dcfce7', ring: '#22c55e' };
+  if (score >= 70) return { grade: 'B', label: 'Good',       color: '#1d4ed8', bg: '#dbeafe', ring: '#3b82f6' };
+  if (score >= 55) return { grade: 'C', label: 'Average',    color: '#b45309', bg: '#fef3c7', ring: '#f59e0b' };
+  if (score >= 40) return { grade: 'D', label: 'Below Avg',  color: '#c2410c', bg: '#ffedd5', ring: '#f97316' };
+  return                  { grade: 'F', label: 'Poor',        color: '#dc2626', bg: '#fee2e2', ring: '#ef4444' };
 };
 
 // ─── RESTAURANT CARD ─────────────────────────────────────────────────────────
@@ -172,6 +186,9 @@ const CustomerDashboard = () => {
   const [selectedSearchPlace, setSelectedSearchPlace] = useState(null);
   const [selectedPlaceDetails, setSelectedPlaceDetails] = useState(null);
 
+  // Real sentiment from backend VADER analysis
+  const [sentimentData, setSentimentData] = useState(null); // { positive, neutral, negative, sentiment, insight, reviewCount, loading }
+
   // Ref for scrolling the list panel to top when a card is opened
   const listPanelRef = useRef(null);
 
@@ -193,6 +210,46 @@ const CustomerDashboard = () => {
     for (let i = 0; i < placeId.length; i++) h = (Math.imul(31, h) + placeId.charCodeAt(i)) | 0;
     return 58 + Math.abs(h % 38); // 58–95
   };
+
+  // Builds a mock sentiment object deterministically (fallback when backend is unavailable)
+  const buildMockSentimentData = (placeId) => {
+    const pos = mockSentiment(String(placeId));
+    const neg = Math.max(5, Math.round((100 - pos) * 0.35));
+    const neu = 100 - pos - neg;
+    let insight = '';
+    if (pos >= 80) insight = 'Customers consistently rate this place highly. The food and service receive strong praise.';
+    else if (pos >= 65) insight = 'Most customers enjoy this restaurant. A few concerns about service speed are noted.';
+    else if (pos >= 50) insight = 'Opinions are mixed. Many enjoy the food but some customers mention service issues.';
+    else insight = 'Balanced reception — the restaurant has both fans and critics worth considering.';
+    return { positive: pos, neutral: neu, negative: neg, sentiment: pos, insight, reviewCount: 0, loading: false, source: 'mock' };
+  };
+
+  // Fetch real Google reviews for the selected place and run VADER analysis on backend
+  // Backend uses Puppeteer to scrape Google Maps (up to 25 reviews), falls back to Places API reviews, then mock
+  useEffect(() => {
+    if (!selectedPlaceDetails) { setSentimentData(null); return; }
+
+    setSentimentData({ loading: true });
+
+    const placeId = selectedPlaceDetails.placeId;
+    const placeName = selectedPlaceDetails.name || '';
+    const address = selectedPlaceDetails.address || selectedPlaceDetails.location || '';
+
+    // Collect any reviews already attached (Places API gives up to 5 as fallback for backend)
+    const existingReviews = Array.isArray(selectedPlaceDetails.reviews)
+      ? selectedPlaceDetails.reviews.map(r => (typeof r === 'string' ? r : r?.text || '')).filter(Boolean)
+      : [];
+
+    fetch('http://localhost:5000/api/sentiment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ placeId, placeName, address, reviews: existingReviews }),
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(data => setSentimentData({ ...data, loading: false }))
+      .catch(() => setSentimentData(buildMockSentimentData(placeId || placeName)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlaceDetails]);
 
   // Compute distance (km) between two lat/lng points using Haversine formula
   const distanceKm = (lat1, lon1, lat2, lon2) => {
@@ -661,20 +718,44 @@ const CustomerDashboard = () => {
                     backgroundPosition: 'center',
                     overflow: 'hidden',
                   }}>
-                    {/* AI Score Space & Badge */}
-                    <div style={{
-                      position: 'absolute', top: '12px', left: '12px',
-                      background: 'rgba(255, 255, 255, 0.95)',
-                      backdropFilter: 'blur(10px)',
-                      borderRadius: '10px', padding: '6px 12px',
-                      fontSize: '11px', fontWeight: '700',
-                      color: '#0f172a',
-                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                      display: 'flex', alignItems: 'center', gap: '6px',
-                    }}>
-                      <span style={{ fontSize: '16px' }}>⭐</span>
-                      <span>AI Score: Fetching...</span>
-                    </div>
+                    {/* AI Score Badge */}
+                    {(() => {
+                      const aiScore = sentimentData && !sentimentData.loading
+                        ? calcAIScore(sentimentData.positive, sentimentData.neutral, sentimentData.negative)
+                        : null;
+                      const g = aiScore !== null ? getGrade(aiScore) : null;
+                      return (
+                        <div style={{
+                          position: 'absolute', top: '12px', left: '12px',
+                          background: 'rgba(255,255,255,0.97)',
+                          backdropFilter: 'blur(12px)',
+                          borderRadius: '12px', padding: '6px 10px',
+                          boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
+                          display: 'flex', alignItems: 'center', gap: '8px',
+                          border: g ? `1.5px solid ${g.ring}` : '1.5px solid #e2e8f0',
+                        }}>
+                          {/* Grade circle */}
+                          <div style={{
+                            width: '32px', height: '32px', borderRadius: '50%',
+                            background: g ? g.bg : '#f1f5f9',
+                            border: `2px solid ${g ? g.ring : '#cbd5e1'}`,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontWeight: '800', fontSize: '15px',
+                            color: g ? g.color : '#64748b', flexShrink: 0,
+                          }}>
+                            {sentimentData?.loading ? '…' : (g ? g.grade : '?')}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10px', fontWeight: '700', color: g ? g.color : '#64748b', lineHeight: 1 }}>
+                              {sentimentData?.loading ? 'Analysing…' : (g ? g.label : 'AI Score')}
+                            </div>
+                            <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', lineHeight: 1.3 }}>
+                              {aiScore !== null ? `${aiScore}/100` : '—'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Quick Buttons */}
                     <div style={{
@@ -787,53 +868,170 @@ const CustomerDashboard = () => {
                       )}
                     </div>
 
-                    {/* ─ Sentiment Summary (CORE FYP FEATURE) ─ */}
+                    {/* ─ Sentiment Analysis (CORE FYP FEATURE) ─ */}
                     <div style={{
-                      padding: '10px', background: '#f0f9ff', borderRadius: '10px',
+                      padding: '10px 12px', background: '#f0f9ff', borderRadius: '10px',
                       marginBottom: '10px', border: '1px solid #bfdbfe',
                     }}>
-                      <p style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: '0 0 8px' }}>
-                        😊 AI Sentiment Analysis
+                      <p style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        🤖 AI Sentiment Analysis
                       </p>
-                      <div style={{
-                        display: 'flex', gap: '8px', flexWrap: 'wrap',
-                      }}>
-                        <span style={{
-                          fontSize: '11px', fontWeight: '600',
-                          padding: '4px 10px', borderRadius: '6px',
-                          background: '#dcfce7', color: '#15803d',
-                        }}>
-                          😊 75% Positive
-                        </span>
-                        <span style={{
-                          fontSize: '11px', fontWeight: '600',
-                          padding: '4px 10px', borderRadius: '6px',
-                          background: '#fef3c7', color: '#b45309',
-                        }}>
-                          😐 18% Neutral
-                        </span>
-                        <span style={{
-                          fontSize: '11px', fontWeight: '600',
-                          padding: '4px 10px', borderRadius: '6px',
-                          background: '#fee2e2', color: '#dc2626',
-                        }}>
-                          😡 7% Negative
-                        </span>
-                      </div>
+                      {sentimentData && sentimentData.loading && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#2563eb', fontSize: '12px', fontWeight: '600' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+                          Scraping Google Maps reviews…
+                        </div>
+                      )}
+                      {sentimentData && !sentimentData.loading && (() => {
+                        const aiScore = calcAIScore(sentimentData.positive, sentimentData.neutral, sentimentData.negative);
+                        const g = getGrade(aiScore);
+                        return (
+                          <>
+                            {/* Score row */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px' }}>
+                              {/* Circular score */}
+                              <div style={{
+                                width: '46px', height: '46px', borderRadius: '50%', flexShrink: 0,
+                                background: `conic-gradient(${g.ring} ${aiScore * 3.6}deg, #e2e8f0 0deg)`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                              }}>
+                                <div style={{
+                                  width: '34px', height: '34px', borderRadius: '50%',
+                                  background: '#f0f9ff',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontWeight: '800', fontSize: '13px', color: g.color,
+                                }}>
+                                  {g.grade}
+                                </div>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '2px' }}>
+                                  <span style={{ fontSize: '12px', fontWeight: '700', color: g.color }}>{g.label}</span>
+                                  <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>{aiScore}<span style={{ fontSize: '10px', color: '#94a3b8' }}>/100</span></span>
+                                </div>
+                                {/* Stacked bar */}
+                                <div style={{ display: 'flex', height: '7px', borderRadius: '4px', overflow: 'hidden', background: '#e2e8f0' }}>
+                                  <div style={{ width: `${sentimentData.positive}%`, background: 'linear-gradient(90deg,#2563eb,#3b82f6)', transition: 'width 0.6s ease' }} />
+                                  <div style={{ width: `${sentimentData.neutral}%`, background: '#f59e0b', transition: 'width 0.6s ease' }} />
+                                  <div style={{ width: `${sentimentData.negative}%`, background: '#ef4444', transition: 'width 0.6s ease' }} />
+                                </div>
+                              </div>
+                            </div>
+                            {/* Breakdown pills */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '5px', marginBottom: '7px' }}>
+                              {[['😊','Positive', sentimentData.positive,'#dbeafe','#1d4ed8'],
+                                ['😐','Neutral',  sentimentData.neutral, '#fef3c7','#b45309'],
+                                ['😡','Negative', sentimentData.negative,'#fee2e2','#dc2626']].map(([emoji, lbl, val, bg, col]) => (
+                                <div key={lbl} style={{ background: bg, borderRadius: '7px', padding: '5px 4px', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '13px' }}>{emoji}</div>
+                                  <div style={{ fontSize: '12px', fontWeight: '800', color: col }}>{val}%</div>
+                                  <div style={{ fontSize: '9px', color: col, fontWeight: '600', letterSpacing: '0.3px' }}>{lbl}</div>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Source / count */}
+                            <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              {sentimentData.reviewCount > 0
+                                ? `📊 ${sentimentData.reviewCount} review${sentimentData.reviewCount !== 1 ? 's' : ''} analysed`
+                                : '🔮 Estimated'}
+                              {' · '}
+                              {sentimentData.source?.includes('google_scrape') ? '🌐 Google Maps'
+                                : sentimentData.source?.includes('places_api') ? '📌 Places API'
+                                : '🔮 Fallback'}
+                              {' · '}
+                              {sentimentData.model === 'vader' ? 'VADER NLP' : 'RoBERTa AI'}
+                            </p>
+                          </>
+                        );
+                      })()}
                     </div>
 
-                    {/* ─ Quick Insight Tag ─ */}
-                    <div style={{
-                      padding: '10px', background: '#f8f6ff', borderRadius: '10px',
-                      border: '1px solid #e9d5ff', marginBottom: '10px',
-                    }}>
-                      <p style={{
-                        fontSize: '11px', color: '#6b21a8', fontStyle: 'italic',
-                        margin: 0, lineHeight: 1.4,
+                    {/* ─ AI Natural Review ─ */}
+                    {sentimentData && !sentimentData.loading && (
+                      <div style={{
+                        padding: '12px 14px', background: 'linear-gradient(135deg, #f8f6ff 0%, #fdf4ff 100%)',
+                        borderRadius: '10px', border: '1px solid #e9d5ff', marginBottom: '10px',
                       }}>
-                        💡 "Customers love the food taste but complain about slow service and waiting times"
-                      </p>
-                    </div>
+                        {/* Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+                          <span style={{ fontSize: '13px' }}>🤖</span>
+                          <span style={{ fontSize: '11px', fontWeight: '700', color: '#7c3aed' }}>AI Review Summary</span>
+                          {sentimentData.model && sentimentData.model !== 'vader' && (
+                            <span style={{ fontSize: '9px', background: '#ede9fe', color: '#6d28d9', padding: '1px 6px', borderRadius: '6px', fontWeight: '600', marginLeft: 'auto' }}>
+                              RoBERTa + Extractive AI
+                            </span>
+                          )}
+                        </div>
+
+                        {sentimentData.naturalReviewSections ? (() => {
+                          const sections = sentimentData.naturalReviewSections;
+                          const overview = sections.find(s => s.type === 'overview');
+                          const verdict  = sections.find(s => s.type === 'verdict');
+                          const topics   = sections.filter(s => ['food','service','ambiance','concern','value'].includes(s.type));
+
+                          const topicStyle = {
+                            food:     { bg: '#f0fdf4', border: '#86efac', label: '#15803d', dot: '#22c55e' },
+                            service:  { bg: '#eff6ff', border: '#93c5fd', label: '#1d4ed8', dot: '#3b82f6' },
+                            ambiance: { bg: '#fefce8', border: '#fde047', label: '#a16207', dot: '#eab308' },
+                            concern:  { bg: '#fff7ed', border: '#fdba74', label: '#c2410c', dot: '#f97316' },
+                            value:    { bg: '#fdf4ff', border: '#d8b4fe', label: '#7e22ce', dot: '#a855f7' },
+                          };
+
+                          return (
+                            <div>
+                              {/* Overview */}
+                              {overview && (
+                                <p style={{ fontSize: '11.5px', color: '#4c1d95', margin: '0 0 10px 0', lineHeight: 1.6, fontStyle: 'italic', paddingBottom: '8px', borderBottom: '1px dashed #ddd6fe' }}>
+                                  {overview.text}
+                                </p>
+                              )}
+
+                              {/* Topic sections */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginBottom: '10px' }}>
+                                {topics.map((sec, i) => {
+                                  const st = topicStyle[sec.type] || topicStyle.food;
+                                  return (
+                                    <div key={i} style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: '7px', padding: '7px 9px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '4px' }}>
+                                        <span style={{ fontSize: '12px' }}>{sec.icon}</span>
+                                        <span style={{ fontSize: '10px', fontWeight: '700', color: st.label, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                          {sec.label}
+                                        </span>
+                                        <span style={{ fontSize: '9px', color: '#9ca3af', marginLeft: 'auto' }}>
+                                          {sec.framing}
+                                        </span>
+                                      </div>
+                                      <div style={{ paddingLeft: '8px', borderLeft: `2px solid ${st.dot}` }}>
+                                        <p style={{ fontSize: '11px', color: '#1f2937', margin: 0, lineHeight: 1.55, fontStyle: 'italic' }}>
+                                          "{sec.quote}"
+                                        </p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Verdict */}
+                              {verdict && (
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingTop: '8px', borderTop: '1px dashed #ddd6fe' }}>
+                                  <span style={{ fontSize: '12px', marginTop: '1px' }}>
+                                    {(sentimentData.positive || 0) >= 70 ? '✅' : (sentimentData.positive || 0) >= 50 ? '🔶' : '❌'}
+                                  </span>
+                                  <p style={{ fontSize: '11px', fontWeight: '600', color: '#4c1d95', margin: 0, lineHeight: 1.5 }}>
+                                    {verdict.text}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })() : (
+                          /* Fallback: plain text or insight */
+                          <p style={{ fontSize: '12px', color: sentimentData.naturalReview ? '#3b0764' : '#6b21a8', margin: 0, lineHeight: 1.6, fontStyle: sentimentData.naturalReview ? 'normal' : 'italic' }}>
+                            {sentimentData.naturalReview ? sentimentData.naturalReview : `💡 ${sentimentData.insight}`}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {/* ─ Action Buttons ─ */}
                     <div style={{
