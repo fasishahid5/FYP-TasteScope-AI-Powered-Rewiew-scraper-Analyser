@@ -1,8 +1,9 @@
 import React from 'react';
 import BusinessOwnerLayout from '../components/BusinessOwnerLayout';
-import { restaurants } from '../data/restaurants';
+import { useRestaurants } from '../lib/useRestaurants';
 
 const MyRestaurants = () => {
+  const { restaurants: restaurantsData = [] } = useRestaurants();
   const handleAddRestaurant = () => {
     window.alert('Add Restaurant flow will be added here.');
   };
@@ -37,7 +38,7 @@ const MyRestaurants = () => {
         </div>
 
         <div style={{ display: 'grid', gap: '20px' }}>
-          {restaurants.map((restaurant) => (
+          {restaurantsData.map((restaurant) => (
             <div
               key={restaurant.id}
               style={{

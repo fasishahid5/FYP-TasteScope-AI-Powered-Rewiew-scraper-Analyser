@@ -3,6 +3,22 @@ const protectRoute = require('../middleware/auth');
 const role = require('../middleware/role');
 const router = express.Router();
 
+let sharedRestaurantsCache = null;
+
+async function getSharedRestaurants() {
+  if (sharedRestaurantsCache) return sharedRestaurantsCache;
+
+  try {
+    const module = await import('../../data/restaurants.js');
+    sharedRestaurantsCache = module.restaurants || module.default || [];
+  } catch (err) {
+    console.error('Failed to import shared restaurants:', err);
+    sharedRestaurantsCache = [];
+  }
+
+  return sharedRestaurantsCache;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // TEST ENDPOINT (NO AUTH) - For debugging
 // ════════════════════════════════════════════════════════════════════════════
@@ -232,42 +248,7 @@ router.get('/restaurants', async (req, res) => {
   try {
     console.log('Restaurants called');
 
-    // Owner's restaurants
-    const restaurants = [
-      {
-        _id: '1',
-        name: 'Arcadian Cafe',
-        location: 'Lahore',
-        rating: 4.8,
-        reviews: 2340,
-        sentiment: 'positive',
-      },
-      {
-        _id: '2',
-        name: 'Biryani Street',
-        location: 'Karachi',
-        rating: 4.5,
-        reviews: 1890,
-        sentiment: 'positive',
-      },
-      {
-        _id: '3',
-        name: 'Karahi King',
-        location: 'Islamabad',
-        rating: 4.3,
-        reviews: 1560,
-        sentiment: 'neutral',
-      },
-      {
-        _id: '4',
-        name: 'Spice Route',
-        location: 'Peshawar',
-        rating: 4.6,
-        reviews: 1420,
-        sentiment: 'positive',
-      },
-    ];
-
+    const restaurants = await getSharedRestaurants();
     res.json(restaurants);
   } catch (error) {
     console.error('Restaurants fetch error:', error);

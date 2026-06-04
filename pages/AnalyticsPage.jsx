@@ -1,12 +1,15 @@
 import React from 'react';
 import BusinessOwnerLayout from '../components/BusinessOwnerLayout';
-import { restaurants } from '../data/restaurants';
+import { useRestaurants } from '../lib/useRestaurants';
 
 const AnalyticsPage = () => {
-  const totalReviews = restaurants.reduce((sum, r) => sum + r.reviews, 0);
-  const averageRating = (restaurants.reduce((sum, r) => sum + r.rating, 0) / restaurants.length).toFixed(1);
-  const positive = restaurants.filter((r) => r.sentiment >= 80).length;
-  const negative = restaurants.filter((r) => r.sentiment <= 70).length;
+  const { restaurants: restaurantsData = [] } = useRestaurants();
+  const totalReviews = restaurantsData.reduce((sum, r) => sum + (r.reviews || 0), 0);
+  const averageRating = restaurantsData.length
+    ? (restaurantsData.reduce((sum, r) => sum + (r.rating || 0), 0) / restaurantsData.length).toFixed(1)
+    : '0.0';
+  const positive = restaurantsData.filter((r) => (r.sentiment || 0) >= 80).length;
+  const negative = restaurantsData.filter((r) => (r.sentiment || 0) <= 70).length;
 
   return (
     <BusinessOwnerLayout

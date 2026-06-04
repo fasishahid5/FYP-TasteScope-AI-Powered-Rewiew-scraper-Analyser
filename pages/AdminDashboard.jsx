@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LineChart,
@@ -17,13 +17,7 @@ import {
   Radar,
 } from 'recharts';
 import AdminLayout from '../components/AdminLayout';
-
-const stats = [
-  { label: 'Total users', value: 4821 },
-  { label: 'Business owners', value: 312 },
-  { label: 'Restaurants', value: 1189 },
-  { label: 'Reviews', value: 15432 },
-];
+import { useRestaurants } from '../lib/useRestaurants';
 
 const growthData = [
   { month: 'Jan', users: 4200, restaurants: 900, reviews: 9800 },
@@ -48,20 +42,6 @@ const sentimentDistribution = [
   { label: 'Negative', value: 1732 },
 ];
 
-const topRestaurants = [
-  { label: 'Arcadian Cafe', value: 1840 },
-  { label: 'Biryani Street', value: 1590 },
-  { label: 'Karahi King', value: 1410 },
-  { label: 'Spice Route', value: 1240 },
-];
-
-const topCities = [
-  { label: 'Lahore', value: 6450 },
-  { label: 'Karachi', value: 5120 },
-  { label: 'Islamabad', value: 3760 },
-  { label: 'Peshawar', value: 2480 },
-];
-
 const recentActivities = [
   { id: 1, activity: 'User signup', user: 'Fatima Ali', date: 'Jun 3, 2026' },
   { id: 2, activity: 'Owner request approved', user: 'Admin', date: 'Jun 2, 2026' },
@@ -82,6 +62,50 @@ const adminSettings = [
 ];
 
 const AdminDashboard = () => {
+  const { restaurants: restaurantsData = [] } = useRestaurants();
+
+  const totalReviewCount = useMemo(
+    () => restaurantsData.reduce((sum, r) => sum + (r.reviews || 0), 0),
+    [restaurantsData]
+  );
+
+  const cityReviewTotals = useMemo(
+    () => Object.entries(
+      restaurantsData.reduce((acc, r) => {
+        const city = String(r.location || '').split(',').pop().trim();
+        acc[city] = (acc[city] || 0) + (r.reviews || 0);
+        return acc;
+      }, {})
+    ),
+    [restaurantsData]
+  );
+
+  const stats = useMemo(
+    () => [
+      { label: 'Total users', value: 4821 },
+      { label: 'Business owners', value: 312 },
+      { label: 'Restaurants', value: restaurantsData.length },
+      { label: 'Reviews', value: totalReviewCount },
+    ],
+    [restaurantsData.length, totalReviewCount]
+  );
+
+  const topRestaurants = useMemo(
+    () => [...restaurantsData]
+      .sort((a, b) => (b.reviews || 0) - (a.reviews || 0))
+      .slice(0, 4)
+      .map((r) => ({ label: r.name, value: r.reviews || 0 })),
+    [restaurantsData]
+  );
+
+  const topCities = useMemo(
+    () => [...cityReviewTotals]
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 4)
+      .map(([label, value]) => ({ label, value })),
+    [cityReviewTotals]
+  );
+
   const navigate = useNavigate();
 
   return (

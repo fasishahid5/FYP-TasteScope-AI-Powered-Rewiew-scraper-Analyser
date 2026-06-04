@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import GoogleMapView from '../components/GoogleMapView';
 import AutocompleteSearch from '../components/AutocompleteSearch';
-import { restaurants } from '../data/restaurants';
+import { useRestaurants } from '../lib/useRestaurants';
 import { getStoredUser } from '../lib/auth';
 
 // Filter icon for the filter button.
@@ -166,6 +166,7 @@ const CustomerDashboard = () => {
   // Real nearby restaurants fetched from Google Places
   const [nearbyRestaurants, setNearbyRestaurants] = useState([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
+  const { restaurants: restaurantsData, isLoading: restaurantsLoading, error: restaurantsError, isFallback: restaurantsIsFallback } = useRestaurants();
 
   // Searched place marker and details
   const [selectedSearchPlace, setSelectedSearchPlace] = useState(null);
@@ -255,8 +256,17 @@ const CustomerDashboard = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapInstance, userLocation]);
 
-  // Source: use real nearby results when available, fall back to mock data
-  const activeRestaurants = nearbyRestaurants.length > 0 ? nearbyRestaurants : restaurants;
+  // Source: use real nearby results when available, fall back to API-loaded data
+  const activeRestaurants = nearbyRestaurants.length > 0
+    ? nearbyRestaurants
+    : (userLocation || selectedSearchPlace ? restaurantsData : []);
+
+  const restaurantsUnavailable = !restaurantsLoading && restaurantsError;
+  const restaurantsStatusMessage = restaurantsUnavailable
+    ? `Unable to load restaurant data from the shared API. ${restaurantsError?.message || 'Please ensure the backend is running and you are authenticated.'}${restaurantsIsFallback ? ' Fallback data is available in development mode.' : ''}`
+    : restaurantsLoading
+      ? 'Loading restaurants, please wait…'
+      : null;
 
   // Persist compareList to localStorage so CompareDashboard can read it
   useEffect(() => {
@@ -433,10 +443,11 @@ const CustomerDashboard = () => {
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', width: '100%' }}>
             
             {/* Autocomplete search with Google Places */}
-            <AutocompleteSearch 
-              mapInstance={mapInstance} 
+            <AutocompleteSearch
+              mapInstance={mapInstance}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
+              locationBias={userLocation}
               onPlaceSelected={(placeData) => {
                 console.log("Selected Location Details:", placeData);
                 const shortName = placeData.name.split(',')[0];
@@ -726,7 +737,13 @@ const CustomerDashboard = () => {
                       }}>
                         🏷️ {selectedPlaceDetails.types && selectedPlaceDetails.types.length > 0
                           ? selectedPlaceDetails.types[0].replace(/_/g, ' ')
-                          : 'Restaurant'} • {selectedPlaceDetails.priceLevel ? '$'.repeat(selectedPlaceDetails.priceLevel.length) : 'N/A'}
+                          : 'Restaurant'} • {
+                            typeof selectedPlaceDetails.priceLevel === 'number'
+                              ? '$'.repeat(selectedPlaceDetails.priceLevel)
+                              : selectedPlaceDetails.priceLevel
+                                ? selectedPlaceDetails.priceLevel
+                                : 'N/A'
+                          }
                       </p>
                       <p style={{
                         fontSize: '11px', color: '#94a3b8', margin: 0,
@@ -884,7 +901,7 @@ const CustomerDashboard = () => {
                   gridColumn: '1 / -1', textAlign: 'center',
                   color: '#94a3b8', padding: '48px 0', fontSize: '14px',
                 }}>
-                  No restaurants found matching your search.
+                  {restaurantsStatusMessage || (locationLoading ? 'Locating restaurants near you...' : userLocation || searchQuery ? 'No restaurants match your search.' : 'Use the search box or allow location access to see nearby restaurants.')}
                 </div>
               ) : (
                 filteredRestaurants.map((r) => (

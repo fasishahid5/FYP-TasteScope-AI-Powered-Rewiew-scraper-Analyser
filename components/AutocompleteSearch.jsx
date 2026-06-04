@@ -1,6 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  filterRestaurantPredictions,
+  formatPredictionLabel,
+  getPakistanSearchCenter,
+} from '../lib/googlePlacesUtils';
 
-// Your exact original SearchBarIcon
 const SearchBarIcon = ({ color = '#94a3b8' }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
     stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -9,22 +13,46 @@ const SearchBarIcon = ({ color = '#94a3b8' }) => (
   </svg>
 );
 
-function AutocompleteSearch({ mapInstance, onPlaceSelected, searchQuery, setSearchQuery }) {
+function AutocompleteSearch({
+  mapInstance,
+  mapsReady = false,
+  onPlaceSelected,
+  onSubmit,
+  searchQuery,
+  setSearchQuery,
+  locationBias,
+  debounceMs = 120,
+  placeholder = 'Search restaurants, cuisines, or dishes...',
+  containerStyle,
+  inputBoxStyle,
+  inputStyle,
+  dropdownStyle,
+}) {
   const [predictions, setPredictions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const autocompleteService = useRef(null);
   const placesService = useRef(null);
+  const placesDivRef = useRef(null);
   const containerRef = useRef(null);
 
-  // Initialize Google Places services once the map instance loads
-  useEffect(() => {
-    if (mapInstance && window.google) {
-      autocompleteService.current = new window.google.maps.places.AutocompleteService();
-      placesService.current = new window.google.maps.places.PlacesService(mapInstance);
-    }
-  }, [mapInstance]);
+  const searchCenter = getPakistanSearchCenter(locationBias);
+  const canUsePlaces = mapsReady || !!mapInstance;
 
-  // Fetch live predictions as the user types
+  useEffect(() => {
+    if (!canUsePlaces || !window.google?.maps?.places) return;
+
+    autocompleteService.current = new window.google.maps.places.AutocompleteService();
+
+    if (mapInstance) {
+      placesService.current = new window.google.maps.places.PlacesService(mapInstance);
+    } else {
+      if (!placesDivRef.current) {
+        placesDivRef.current = document.createElement('div');
+      }
+      placesService.current = new window.google.maps.places.PlacesService(placesDivRef.current);
+    }
+  }, [mapInstance, canUsePlaces]);
+
   useEffect(() => {
     if (!searchQuery.trim() || !autocompleteService.current) {
       setPredictions([]);
@@ -32,130 +60,202 @@ function AutocompleteSearch({ mapInstance, onPlaceSelected, searchQuery, setSear
     }
 
     const delayDebounce = setTimeout(() => {
+      const location = new window.google.maps.LatLng(searchCenter.lat, searchCenter.lng);
+      const baseRequest = {
+        input: searchQuery,
+        componentRestrictions: { country: 'pk' },
+        location,
+        radius: 50000,
+      };
+
+      const applyPredictions = (results) => {
+        setPredictions(filterRestaurantPredictions(results || []));
+      };
+
       autocompleteService.current.getPlacePredictions(
-        {
-          input: searchQuery,
-          componentRestrictions: { country: "pk" }, // Primary region constraint
-        },
+        { ...baseRequest, types: 'restaurant' },
         (results, status) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-            setPredictions(results);
-          } else {
-            setPredictions([]);
+          const ok = status === window.google.maps.places.PlacesServiceStatus.OK;
+          const filtered = filterRestaurantPredictions(ok ? results : []);
+          if (filtered.length) {
+            applyPredictions(filtered);
+            return;
           }
+          autocompleteService.current.getPlacePredictions(baseRequest, (results2, status2) => {
+            const ok2 = status2 === window.google.maps.places.PlacesServiceStatus.OK;
+            applyPredictions(ok2 ? results2 : []);
+          });
         }
       );
-    }, 200); // 200ms debounce to prevent hitting API limits instantly
+    }, debounceMs);
 
     return () => clearTimeout(delayDebounce);
-  }, [searchQuery]);
+  }, [searchQuery, searchCenter.lat, searchCenter.lng, debounceMs, canUsePlaces]);
 
-  // Close dropdown if user clicks completely outside the search area
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (containerRef.current && !containerRef.current.contains(event.target)) {
         setShowDropdown(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const handlePredictionClick = (prediction) => {
-    setSearchQuery(prediction.description);
+    const brandQuery =
+      prediction.structured_formatting?.main_text ||
+      prediction.description.split(',')[0].trim();
+    setSearchQuery(brandQuery);
     setShowDropdown(false);
 
-    if (!placesService.current || !mapInstance) return;
+    // Log search when user clicks on location from dropdown
+    if (onSubmit && brandQuery.trim().length >= 2) {
+      onSubmit(brandQuery.trim());
+    }
 
-    // Fetch detailed information about the place (including reviews, photos, ratings, etc.)
+    if (!placesService.current) return;
+
     placesService.current.getDetails(
-      { placeId: prediction.place_id, fields: ["geometry", "name", "formatted_address", "rating", "user_ratings_total", "reviews", "photos", "opening_hours", "price_level", "website", "formatted_phone_number", "types", "url"] },
+      {
+        placeId: prediction.place_id,
+        fields: [
+          'geometry', 'name', 'formatted_address', 'rating', 'user_ratings_total',
+          'reviews', 'photos', 'opening_hours', 'price_level', 'website',
+          'formatted_phone_number', 'types', 'url', 'place_id',
+        ],
+      },
       (place, status) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && place.geometry?.location) {
-          const lat = place.geometry.location.lat();
-          const lng = place.geometry.location.lng();
+        if (status !== window.google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) {
+          return;
+        }
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
 
-          // Smoothly pan and zoom map to selection
+        if (mapInstance) {
           mapInstance.panTo({ lat, lng });
           mapInstance.setZoom(14);
+        }
 
-          if (onPlaceSelected) {
-            onPlaceSelected({ 
-              lat, 
-              lng, 
-              name: place.name || place.formatted_address,
-              // Full place details for displaying card
-              address: place.formatted_address,
-              rating: place.rating,
-              reviews: place.reviews,
-              userRatingsTotal: place.user_ratings_total,
-              photos: place.photos,
-              types: place.types,
-              openingHours: place.opening_hours,
-              priceLevel: place.price_level,
-              website: place.website,
-              phoneNumber: place.formatted_phone_number,
-              url: place.url,
-              placeId: prediction.place_id
-            });
-          }
+        if (onPlaceSelected) {
+          onPlaceSelected({
+            lat,
+            lng,
+            name: place.name || place.formatted_address,
+            address: place.formatted_address,
+            rating: place.rating,
+            reviews: place.reviews,
+            userRatingsTotal: place.user_ratings_total,
+            photos: place.photos,
+            types: place.types,
+            openingHours: place.opening_hours,
+            priceLevel: place.price_level,
+            website: place.website,
+            phoneNumber: place.formatted_phone_number,
+            url: place.url,
+            placeId: prediction.place_id,
+          });
         }
       }
     );
   };
 
+  const defaultBoxStyle = {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: '#f8fafc',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '10px',
+    padding: '0 14px',
+    width: '100%',
+  };
+
+  const defaultInputStyle = {
+    width: '100%',
+    border: 'none',
+    background: 'transparent',
+    fontSize: '13px',
+    color: '#1e293b',
+    fontFamily: "'Poppins', sans-serif",
+    padding: '11px 0',
+    outline: 'none',
+  };
+
+  const defaultDropdownStyle = {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    background: '#ffffff',
+    border: '1px solid #e2e8f0',
+    borderRadius: '10px',
+    marginTop: '6px',
+    minHeight: '40px',
+    maxHeight: '280px',
+    overflowY: 'auto',
+    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+    zIndex: 1000,
+    padding: '6px 0',
+  };
+
   return (
-    <div ref={containerRef} style={{ flex: 1, position: "relative", display: "flex", alignItems: "center" }}>
-      
-      {/* YOUR EXACT ORIGINAL INPUT VISUAL LOOK */}
-      <div style={{
-        flex: 1, display: 'flex', alignItems: 'center', gap: '8px',
-        background: '#f8fafc', border: '1.5px solid #e2e8f0',
-        borderRadius: '10px', padding: '0 14px', width: '100%'
-      }}>
+    <div
+      ref={containerRef}
+      style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', ...containerStyle }}
+    >
+      <div style={{ ...defaultBoxStyle, ...inputBoxStyle }}>
         <SearchBarIcon />
         <input
           type="text"
-          placeholder="Search restaurants, cuisines, or dishes..."
+          placeholder={placeholder}
           value={searchQuery}
           onChange={(e) => {
             setSearchQuery(e.target.value);
             setShowDropdown(true);
           }}
           onFocus={() => setShowDropdown(true)}
-          style={{
-            width: '100%', border: 'none', background: 'transparent',
-            fontSize: '13px', color: '#1e293b',
-            fontFamily: "'Poppins', sans-serif",
-            padding: '11px 0', outline: 'none',
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              setShowDropdown(false);
+              if (onSubmit && searchQuery.trim().length >= 2) {
+                onSubmit(searchQuery.trim());
+              }
+            }
           }}
+          style={{ ...defaultInputStyle, ...inputStyle }}
         />
       </div>
 
-      {/* Elegant, clean prediction results overlay panel */}
       {showDropdown && predictions.length > 0 && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0,
-          background: "#ffffff", border: "1px solid #e2e8f0",
-          borderRadius: "10px", marginTop: "6px", minHeight: "40px", maxHeight: "240px",
-          overflowY: "auto", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
-          zIndex: 999, padding: "6px 0"
-        }}>
-          {predictions.map((p) => (
-            <div
-              key={p.place_id}
-              onClick={() => handlePredictionClick(p)}
-              style={{
-                padding: "10px 16px", fontSize: "13px", color: "#334155",
-                cursor: "pointer", fontFamily: "'Poppins', sans-serif",
-                transition: "background 0.15s ease",
-              }}
-              onMouseEnter={(e) => e.target.style.background = "#f1f5f9"}
-              onMouseLeave={(e) => e.target.style.background = "transparent"}
-            >
-              {p.description}
-            </div>
-          ))}
+        <div style={{ ...defaultDropdownStyle, ...dropdownStyle }}>
+          {predictions.map((p) => {
+            const { name, location } = formatPredictionLabel(p);
+            return (
+              <div
+                key={p.place_id}
+                onClick={() => handlePredictionClick(p)}
+                style={{
+                  padding: '10px 16px',
+                  fontSize: '13px',
+                  color: '#334155',
+                  cursor: 'pointer',
+                  fontFamily: "'Poppins', sans-serif",
+                  transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{name}</div>
+                {location ? (
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px', lineHeight: 1.35 }}>
+                    {location}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

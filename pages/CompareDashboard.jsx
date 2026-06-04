@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
-import { restaurants as mockRestaurants } from '../data/restaurants';
+import { useRestaurants } from '../lib/useRestaurants';
 import { logCompare } from '../lib/historyService';
 import { getStoredUser } from '../lib/auth';
 
@@ -160,14 +160,15 @@ const CompareDashboard = () => {
   const [activeNav, setActiveNav] = useState('compare');
   const [showAddModal, setShowAddModal] = useState(false);
   const [compareList, setCompareList] = useState(() => readLS('ts_compareList', []));
+  const { restaurants: restaurantsData } = useRestaurants();
 
   const restaurantPool = useMemo(() => {
     const stored = readLS('ts_restaurantPool', []);
     const poolMap = new Map();
-    mockRestaurants.forEach(r => poolMap.set(String(r.id), r));
+    (restaurantsData || []).forEach(r => poolMap.set(String(r.id), r));
     stored.forEach(r => poolMap.set(String(r.id), r));
     return Array.from(poolMap.values());
-  }, []);
+  }, [restaurantsData]);
 
   useEffect(() => { writeLS('ts_compareList', compareList); }, [compareList]);
 

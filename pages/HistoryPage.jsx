@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
-import { restaurants } from '../data/restaurants';
+import { useRestaurants } from '../lib/useRestaurants';
+import { useGoogleRestaurantSearch } from '../lib/useGoogleRestaurantSearch';
+import { logSearch, logView, logCompare, getHistory, clearHistory, removeHistoryItem } from '../lib/historyService';
+import { formatRelativeSearchTime } from '../lib/searchInsights';
 
 const SearchBarIcon = ({ color = '#64748b' }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -29,64 +32,60 @@ const filterOptions = [
   { id: 'searched', label: 'Searches' },
 ];
 
-const initialHistory = [
+// Dummy sample data if no real history exists
+const dummySampleHistory = [
   {
-    id: 1,
-    restaurantId: 1,
-    type: 'viewed',
-    time: '2 hours ago',
-    note: 'Viewed',
-  },
-  {
-    id: 2,
-    restaurantId: 3,
-    type: 'compared',
-    time: '3 hours ago',
-    note: 'Compared',
-  },
-  {
-    id: 3,
-    restaurantId: 4,
-    type: 'viewed',
-    time: 'Yesterday',
-    note: 'Viewed',
-  },
-  {
-    id: 4,
-    restaurantId: 2,
+    id: 'dummy-1',
     type: 'searched',
-    time: 'Yesterday',
-    note: 'Search: "Best burgers near me"',
+    name: 'Butt Karahi',
+    query: 'butt karahi',
+    cuisine: 'Pakistani',
+    priceRange: '$',
+    rating: 4.4,
+    location: 'Lakshmi Chowk, Lahore',
+    distance: 2.1,
+    sentiment: 88,
+    reviews: 3210,
+    resultCount: 20,
+    status: 'Open',
+    time: Date.now() - 60000,
+    image: 'https://source.unsplash.com/400x300/?karahi,food',
   },
   {
-    id: 5,
-    restaurantId: 5,
+    id: 'dummy-2',
     type: 'viewed',
-    time: '2 days ago',
-    note: 'Viewed',
+    name: 'Naan House',
+    cuisine: 'Indian',
+    priceRange: '$$',
+    rating: 4.6,
+    location: 'Mall Road, Lahore',
+    distance: 3.5,
+    sentiment: 78,
+    reviews: 2150,
+    status: 'Open',
+    time: Date.now() - 300000,
+    image: 'https://source.unsplash.com/400x300/?naan,restaurant',
   },
   {
-    id: 6,
-    restaurantId: 6,
-    type: 'compared',
-    time: '3 days ago',
-    note: 'Compared',
-  },
-  {
-    id: 7,
-    restaurantId: 7,
-    type: 'viewed',
-    time: '4 days ago',
-    note: 'Viewed',
-  },
-  {
-    id: 8,
-    restaurantId: 8,
+    id: 'dummy-3',
     type: 'searched',
-    time: '1 week ago',
-    note: 'Search: "Healthy food options"',
+    name: 'Pizza Hut',
+    query: 'pizza',
+    cuisine: 'Fast Food',
+    priceRange: '$$',
+    rating: 4.0,
+    location: 'Defense, Lahore',
+    distance: 5.2,
+    sentiment: 65,
+    reviews: 5420,
+    resultCount: 45,
+    status: 'Open',
+    time: Date.now() - 900000,
+    image: 'https://source.unsplash.com/400x300/?pizza,fastfood',
   },
 ];
+
+const initialHistory = [];
 
 const HistoryPage = () => {
   const navigate = useNavigate();
@@ -96,16 +95,14 @@ const HistoryPage = () => {
   const [selectedType, setSelectedType] = useState('all');
   const [filterOpen, setFilterOpen] = useState(false);
   const [detailItem, setDetailItem] = useState(null);
-  // Initialize history from localStorage key 'userHistory', fallback to initialHistory
+  const { restaurants: restaurantsData = [] } = useRestaurants();
+  
   const [historyItems, setHistoryItems] = useState(() => {
-    try {
-      const raw = localStorage.getItem('userHistory');
-      return raw ? JSON.parse(raw) : initialHistory;
-    } catch (e) {
-      console.error('Failed to read userHistory from localStorage', e);
-      return initialHistory;
-    }
+    const history = getHistory();
+    // Show only real history, no dummy fallback
+    return history;
   });
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const currentFilterLabel = filterOptions.find((option) => option.id === selectedType)?.label || 'All';
 
@@ -129,73 +126,57 @@ const HistoryPage = () => {
   React.useEffect(() => {
     const handler = (e) => {
       try {
-        const arr = e?.detail ?? JSON.parse(localStorage.getItem('userHistory') || '[]');
+        const arr = e?.detail ?? getHistory();
         setHistoryItems(arr);
       } catch (err) {
-        // ignore
+        console.error('Error updating history', err);
       }
     };
     window.addEventListener('historyUpdated', handler);
     return () => window.removeEventListener('historyUpdated', handler);
   }, []);
 
-  /* Event tracking helpers */
-  const buildHistoryItem = (data) => ({
-    id: Date.now() + Math.floor(Math.random() * 9999),
-    ...data,
-  });
+  const handleDelete = useCallback((id) => {
+    setConfirmDeleteId(id);
+  }, []);
 
-  const logViewEvent = (restaurant) => {
-    const item = buildHistoryItem({
-      name: restaurant.name,
-      image: restaurant.image,
-      cuisine: restaurant.cuisine,
-      priceRange: restaurant.priceRange,
-      rating: restaurant.rating ?? 0,
-      location: restaurant.location ?? '',
-      time: 'Just now',
-      type: 'viewed',
-      note: 'Viewed',
-    });
-    setHistoryItems((prev) => [item, ...prev]);
-  };
+  const handleConfirmDelete = useCallback((id) => {
+    removeHistoryItem(id);
+    setHistoryItems((prev) => prev.filter((item) => item.id !== id));
+    setConfirmDeleteId(null);
+  }, []);
 
-  const logSearchEvent = (query, count = 0) => {
-    const item = buildHistoryItem({
-      name: `Search: ${query}`,
-      image: '',
-      cuisine: '',
-      priceRange: '',
-      rating: 0,
-      location: '',
-      time: 'Just now',
-      type: 'searched',
-      note: `Search (${count}) — ${query}`,
-    });
-    setHistoryItems((prev) => [item, ...prev]);
-  };
+  const handleCancelDelete = useCallback(() => {
+    setConfirmDeleteId(null);
+  }, []);
 
-  const logCompareEvent = (arrayOfRestaurants) => {
-    const items = arrayOfRestaurants.map((r) => buildHistoryItem({
-      name: r.name,
-      image: r.image,
-      cuisine: r.cuisine,
-      priceRange: r.priceRange,
-      rating: r.rating ?? 0,
-      location: r.location ?? '',
-      time: 'Just now',
-      type: 'compared',
-      note: 'Compared',
-    }));
-    setHistoryItems((prev) => [...items, ...prev]);
-  };
+  const handleClearAll = useCallback(() => {
+    clearHistory();
+    setHistoryItems([]);
+    setConfirmDeleteId(null);
+  }, []);
 
   const historyWithDetails = useMemo(
     () => historyItems.map((item) => {
-      const rest = restaurants.find((r) => r.id === item.restaurantId || (item.name && r.name === item.name)) || {};
-      return { ...rest, ...item };
+      const searchQuery = (item.query || item.name || '').toLowerCase();
+      const rest = restaurantsData.find((r) =>
+        item.restaurantId === r.id ||
+        (item.name && r.name === item.name) ||
+        (item.type === 'searched' && searchQuery && (
+          r.name?.toLowerCase().includes(searchQuery) ||
+          r.cuisine?.toLowerCase().includes(searchQuery) ||
+          r.location?.toLowerCase().includes(searchQuery)
+        ))
+      ) || {};
+
+      const merged = { ...item, ...rest };
+      if (item.type === 'searched') {
+        merged.location = item.location || rest.location || 'Search results';
+        merged.image = item.image || rest.image || '';
+      }
+      return merged;
     }),
-    [historyItems]
+    [historyItems, restaurantsData]
   );
 
   const filteredHistory = useMemo(() => {
@@ -209,7 +190,7 @@ const HistoryPage = () => {
     });
   }, [historyWithDetails, searchQuery, selectedType]);
 
-  const handleSidebarNavClick = (id) => {
+  const handleSidebarNavClick = useCallback((id) => {
     setActiveNav(id);
     if (id === 'home') navigate('/dashboard');
     if (id === 'search') navigate('/search');
@@ -217,32 +198,42 @@ const HistoryPage = () => {
     if (id === 'history') navigate('/history');
     if (id === 'profile') navigate('/profile');
     if (id === 'settings') navigate('/settings');
-  };
+  }, [navigate]);
 
-  const clearAll = () => {
-    if (window.confirm('Clear all history? This cannot be undone.')) {
-      setHistoryItems([]);
-    }
-  };
+  const handleViewDetail = useCallback((id) => {
+    const item = historyWithDetails.find((h) => h.id === id);
+    if (item) setDetailItem(item);
+  }, [historyWithDetails]);
 
-  const handleView = (id) => {
-    const item = historyWithDetails.find((historyItem) => historyItem.id === id);
-    if (item) {
-      setDetailItem(item);
-    }
-  };
-
-  const handleCloseDetail = () => {
+  const handleCloseDetail = useCallback(() => {
     setDetailItem(null);
-  };
+  }, []);
 
-  const handleDelete = (id) => {
-    if (window.confirm('Delete this history entry?')) {
-      setHistoryItems((prev) => prev.filter((item) => item.id !== id));
+  function QueryImage({ query, fallback }) {
+    const { restaurants = [], isLoading } = useGoogleRestaurantSearch(query || '');
+    const img = restaurants?.[0]?.image;
+
+    if (isLoading) {
+      return (
+        <div style={{ width: '100%', height: '100%', background: 'linear-gradient(90deg,#f1f5f9,#eef2ff)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 36, height: 36, borderRadius: 18, background: '#e6eefc' }} />
+        </div>
+      );
     }
-  };
 
-  const removeItem = (id) => handleDelete(id);
+    if (img) {
+      return <img src={img} alt={query} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />;
+    }
+
+    return (
+      <div style={{ width: '100%', height: '100%', background: fallback || 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f8fafc', fontFamily: "'Poppins', sans-serif" }}>
@@ -283,7 +274,7 @@ const HistoryPage = () => {
 
             <button
               type="button"
-              onClick={clearAll}
+              onClick={handleClearAll}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -447,147 +438,332 @@ const HistoryPage = () => {
         </header>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
-          <div style={{ display: 'grid', gap: '18px' }}>
-            {filteredHistory.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#94a3b8', padding: '40px 20px', borderRadius: '18px', background: '#ffffff', border: '1px solid #e2e8f0' }}>
-                <p style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>No history found</p>
-                <p style={{ margin: '8px 0 0', fontSize: '13px' }}>Try a different search or clear the filter.</p>
-              </div>
-            ) : (
-              filteredHistory.map((item) => {
+          {filteredHistory.length === 0 ? (
+            <div style={{ textAlign: 'center', color: '#94a3b8', padding: '40px 20px', borderRadius: '18px', background: '#ffffff', border: '1px solid #e2e8f0' }}>
+              <p style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>No history found</p>
+              <p style={{ margin: '8px 0 0', fontSize: '13px' }}>Try a different search or clear the filter.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+              {filteredHistory.map((item) => {
                 const badgeStyle = typeStyles[item.type] || typeStyles.viewed;
                 const statusLabel = item.type === 'searched'
                   ? 'Searched'
                   : item.type === 'compared'
                     ? item.note || 'Compared'
                     : 'Viewed';
+
+                const isSearched = item.type === 'searched';
+
                 return (
                   <div
                     key={item.id}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-4px)';
-                      e.currentTarget.style.boxShadow = '0 12px 24px rgba(15, 23, 42, 0.06)';
-                      e.currentTarget.style.borderColor = '#cbd5e1';
+                      e.currentTarget.style.transform = 'translateY(-3px)';
+                      e.currentTarget.style.boxShadow = '0 12px 28px rgba(15, 23, 42, 0.1)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.transform = 'translateY(0px)';
-                      e.currentTarget.style.boxShadow = '0 2px 12px rgba(0, 0, 0, 0.01)';
-                      e.currentTarget.style.borderColor = '#f1f5f9';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(15, 23, 42, 0.05)';
                     }}
                     style={{
                       display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
+                      flexDirection: 'column',
                       background: '#ffffff',
-                      border: '1px solid #f1f5f9',
-                      borderRadius: '20px',
-                      padding: '16px 24px',
-                      boxShadow: '0 2px 12px rgba(0, 0, 0, 0.01)',
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '16px',
+                      overflow: 'hidden',
+                      boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
+                      transition: 'all 0.2s ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                      <img
-                        src={item.image}
-                        alt={item.name}
-                        style={{ width: '96px', height: '96px', borderRadius: '16px', objectFit: 'cover' }}
-                      />
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: '#0f172a' }}>{item.name}</h3>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: badgeStyle.bg, color: badgeStyle.color, fontSize: '12px', fontWeight: '600', padding: '3px 10px', borderRadius: '100px' }}>
-                            <span style={{ width: '6px', height: '6px', backgroundColor: badgeStyle.color, borderRadius: '50%', display: 'inline-block' }} />
-                            {statusLabel}
-                          </span>
-                        </div>
-
-                        <span style={{ fontSize: '14px', color: '#64748b' }}>
-                          {item.cuisine} • {item.priceRange}
-                        </span>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '2px', color: '#64748b', fontSize: '13px' }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#475569', fontWeight: '500' }}>
-                            <span style={{ color: '#fbbf24' }}>★</span> {item.rating}
-                          </span>
-                          <span style={{ color: '#64748b' }}>{item.location}</span>
-                          <span style={{ color: '#94a3b8' }}>• {item.time}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleView(item.id)}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#f1f5f9';
-                          e.currentTarget.style.borderColor = '#cbd5e1';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = '#ffffff';
-                          e.currentTarget.style.borderColor = '#e2e8f0';
-                        }}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          background: '#ffffff',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '100px',
-                          padding: '8px 20px',
-                          fontSize: '14px',
-                          fontWeight: '500',
-                          color: '#0f172a',
-                          cursor: 'pointer',
-                          boxShadow: 'none',
-                          transition: 'all 0.2s ease',
-                        }}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                          <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                        <span>View</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(item.id)}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = '#ef4444';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = '#475569';
-                        }}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: '#475569',
-                          cursor: 'pointer',
-                          padding: '6px',
+                    {/* Image Section */}
+                    <div style={{
+                      position: 'relative',
+                      height: '160px',
+                      overflow: 'hidden',
+                      background: '#f1f5f9',
+                    }}>
+                      {item.image ? (
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                          }}
+                        />
+                      ) : isSearched ? (
+                        <QueryImage query={item.query || item.name} fallback={'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)'} />
+                      ) : (
+                        <div style={{
+                          width: '100%',
+                          height: '100%',
+                          background: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          transition: 'color 0.2s ease',
-                        }}
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          <line x1="10" y1="11" x2="10" y2="17"></line>
-                          <line x1="14" y1="11" x2="14" y2="17"></line>
-                        </svg>
-                      </button>
+                        }}>
+                          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                          </svg>
+                        </div>
+                      )}
+
+                      {/* Badge Overlay */}
+                      <div style={{
+                        position: 'absolute',
+                        top: '12px',
+                        left: '12px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: badgeStyle.bg,
+                        color: badgeStyle.color,
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        padding: '4px 10px',
+                        borderRadius: '20px',
+                      }}>
+                        <span style={{ width: '5px', height: '5px', backgroundColor: badgeStyle.color, borderRadius: '50%', display: 'inline-block' }} />
+                        {statusLabel}
+                      </div>
+                      {item.status && (
+                        <div style={{
+                          position: 'absolute',
+                          top: '12px',
+                          right: '12px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          background: 'rgba(15, 23, 42, 0.88)',
+                          color: '#ffffff',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          padding: '5px 11px',
+                          borderRadius: '9999px',
+                        }}>
+                          {item.status}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Content Section */}
+                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                      {/* Title */}
+                      <h3 style={{
+                        margin: 0,
+                        fontSize: '14px',
+                        fontWeight: '700',
+                        color: '#0f172a',
+                        lineHeight: 1.2,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {item.name}
+                      </h3>
+
+                      {/* Cuisine & Price on same line */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '10px',
+                        color: '#64748b',
+                      }}>
+                        {item.cuisine && <span style={{ fontWeight: 500 }}>{item.cuisine}</span>}
+                        {item.priceRange && <span>{item.priceRange}</span>}
+                      </div>
+
+                      {/* Line 1: Rating + Location */}
+                      <div style={{
+                        fontSize: '11px',
+                        color: '#0f172a',
+                        lineHeight: 1.4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        flexWrap: 'wrap',
+                      }}>
+                        {item.rating != null && (
+                          <>
+                            <span style={{ color: '#fbbf24', fontWeight: 600 }}>★{item.rating}</span>
+                          </>
+                        )}
+                        {item.location && (
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                            <span>📍</span>
+                            <span>{item.location}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Line 2: Sentiment + Reviews */}
+                      <div style={{
+                        fontSize: '11px',
+                        color: '#0f172a',
+                        lineHeight: 1.4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        flexWrap: 'wrap',
+                      }}>
+                        {item.sentiment != null && (
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                            fontWeight: 600,
+                            color: item.sentiment >= 80 ? '#16a34a' : item.sentiment >= 60 ? '#ca8a04' : '#dc2626',
+                          }}>
+                            <span>●</span>
+                            {item.sentiment}% sentiment
+                          </span>
+                        )}
+                        {item.reviews != null && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', color: '#0f172a', fontWeight: 500 }}>
+                            <span>📝</span>
+                            {item.reviews.toLocaleString()} reviews
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Line 3: Query (if searched) */}
+                      {isSearched && item.query && (
+                        <div style={{
+                          fontSize: '10px',
+                          color: '#475569',
+                          padding: '6px 8px',
+                          backgroundColor: '#f8fafc',
+                          borderRadius: '6px',
+                          fontStyle: 'italic',
+                        }}>
+                          Query: <strong>{item.query}</strong>
+                        </div>
+                      )}
+
+                      {/* Line 4: Results + Location (if searched) */}
+                      {isSearched && (
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          fontSize: '10px',
+                          color: '#0f172a',
+                          flexWrap: 'wrap',
+                        }}>
+                          {item.resultCount != null && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                              <span>🔎</span>
+                              <span>{item.resultCount} results</span>
+                            </span>
+                          )}
+                          {item.location && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                              <span>📍</span>
+                              <span>{item.location}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Line 5: Time */}
+                      <div style={{
+                        fontSize: '10px',
+                        color: '#64748b',
+                        marginTop: '4px',
+                      }}>
+                        🕐 {formatRelativeSearchTime(item.time) || 'Just now'}
+                      </div>
+
+                      {/* Action Buttons - Bottom */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: 'auto', paddingTop: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleViewDetail(item.id)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#1d4ed8'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#2563eb'; }}
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(item.id)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #fecaca',
+                            background: '#f8fafc',
+                            color: '#dc2626',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fee2e2'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+
+                      {/* Delete Confirmation */}
+                      {confirmDeleteId === item.id && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmDelete(item.id)}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              background: '#dc2626',
+                              color: '#ffffff',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelDelete}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid #cbd5e1',
+                              background: '#f8fafc',
+                              color: '#475569',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
+          )}
         </div>
       </main>
 

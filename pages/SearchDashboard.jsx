@@ -1,7 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
-import { restaurants } from '../data/restaurants';
+import AutocompleteSearch from '../components/AutocompleteSearch';
+import { useGoogleRestaurantSearch } from '../lib/useGoogleRestaurantSearch';
+import {
+  clearRecentSearchQueries,
+  formatRelativeSearchTime,
+  getRecentSearchQueries,
+  getTrendingSearchTags,
+  logSearchQuery,
+} from '../lib/searchInsights';
 import { getStoredUser } from '../lib/auth';
 
 const SearchBarIcon = ({ color = '#94a3b8' }) => (
@@ -58,7 +66,7 @@ const RestaurantCard = ({ r, inCompare, onToggleCompare }) => {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" /><circle cx="12" cy="9" r="2.5" /></svg>
             <span>{r.location}</span>
           </div>
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>{r.distance || '1.2 km'}</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>{typeof r.distance === 'number' ? `${r.distance.toFixed(1)} km` : ''}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -81,27 +89,79 @@ const SearchDashboard = () => {
   const [activeNav, setActiveNav] = useState('search');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('relevance');
-  const [compareList, setCompareList] = useState([]);
+  const [compareList, setCompareList] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ts_compareList') || '[]'); } catch { return []; }
+  });
+  const [recentSearches, setRecentSearches] = useState([]);
+  const [trendingTags, setTrendingTags] = useState([]);
+  const [pendingSearchQuery, setPendingSearchQuery] = useState('');
+  const pendingSearchKeyRef = useRef('');
 
-  const recentSearches = ['Biryani', 'Pizza near me', 'Chinese food', 'Best burgers'];
-  const trendingTags = ['Karahi', 'BBQ', 'Café', 'Desserts', 'Fast Food'];
+  const { restaurants: restaurantsData, isLoading, error, mapsReady, userLocation } =
+    useGoogleRestaurantSearch(searchQuery);
+
+  const refreshSearchInsights = useCallback(() => {
+    setRecentSearches(getRecentSearchQueries(6));
+    setTrendingTags(getTrendingSearchTags(6));
+  }, []);
+
+  useEffect(() => {
+    refreshSearchInsights();
+    window.addEventListener('historyUpdated', refreshSearchInsights);
+    return () => window.removeEventListener('historyUpdated', refreshSearchInsights);
+  }, [refreshSearchInsights]);
 
   const filteredRestaurants = useMemo(() => {
-    let list = [...restaurants];
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter((r) =>
-        r.name.toLowerCase().includes(q) ||
-        r.cuisine.toLowerCase().includes(q) ||
-        r.location.toLowerCase().includes(q)
-      );
-    }
+    let list = [...restaurantsData];
 
     if (sortBy === 'rating') list.sort((a, b) => b.rating - a.rating);
     if (sortBy === 'sentiment') list.sort((a, b) => b.sentiment - a.sentiment);
     if (sortBy === 'reviews') list.sort((a, b) => b.reviews - a.reviews);
+    if (sortBy === 'relevance' && list[0]?.distance != null) {
+      list.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+    }
     return list;
-  }, [searchQuery, sortBy]);
+  }, [restaurantsData, sortBy]);
+
+  useEffect(() => {
+    try { localStorage.setItem('ts_compareList', JSON.stringify(compareList)); } catch {}
+  }, [compareList]);
+
+  useEffect(() => {
+    if (filteredRestaurants.length > 0) {
+      try { localStorage.setItem('ts_restaurantPool', JSON.stringify(filteredRestaurants)); } catch {}
+    }
+  }, [filteredRestaurants]);
+
+  useEffect(() => {
+    const q = pendingSearchQuery.trim();
+    if (q.length < 2) return;
+
+    const key = q.toLowerCase();
+    if (pendingSearchKeyRef.current === key) return;
+    pendingSearchKeyRef.current = key;
+
+    // Pass first restaurant result details to history
+    logSearchQuery(q, filteredRestaurants.length, filteredRestaurants[0] || null);
+    refreshSearchInsights();
+    setPendingSearchQuery('');
+  }, [pendingSearchQuery, filteredRestaurants, refreshSearchInsights]);
+
+  const handleSearchCommit = useCallback((query) => {
+    const q = String(query || '').trim();
+    if (q.length < 2) return;
+    setSearchQuery(q);
+    setPendingSearchQuery(q);
+  }, []);
+
+  const handleClearRecent = () => {
+    clearRecentSearchQueries();
+    refreshSearchInsights();
+  };
+
+  const applySearch = (query) => {
+    handleSearchCommit(query);
+  };
 
   const toggleCompare = (id) => {
     setCompareList((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -122,7 +182,7 @@ const SearchDashboard = () => {
       <SidebarNav activeItem={activeNav} onNavigate={handleSidebarNavClick} isSidebarOpen={isSidebarOpen} />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        <header style={{ padding: '24px 28px 20px', background: '#ffffff', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
+        <header style={{ padding: '24px 28px 20px', background: '#ffffff', borderBottom: '1px solid #e2e8f0', flexShrink: 0, position: 'relative', zIndex: 20, overflow: 'visible' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '18px', marginBottom: '18px' }}>
             <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
               <button
@@ -151,18 +211,48 @@ const SearchDashboard = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '18px' }}>
-            <div style={{ flex: '1 1 420px', display: 'flex', alignItems: 'center', gap: '10px', background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '16px', padding: '0 16px' }}>
-              <SearchBarIcon />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '18px', alignItems: 'stretch', position: 'relative', zIndex: 30 }}>
+            {mapsReady ? (
+              <AutocompleteSearch
+                mapsReady
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                onSubmit={handleSearchCommit}
+                locationBias={userLocation}
+                debounceMs={120}
                 placeholder="Search restaurants, cuisines, locations..."
-                style={{ flex: 1, border: 'none', background: 'transparent', padding: '16px 0', outline: 'none', fontSize: '14px', color: '#0f172a', fontFamily: "'Poppins', sans-serif" }}
+                containerStyle={{ flex: '1 1 420px', minWidth: 0 }}
+                inputBoxStyle={{
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '16px',
+                  padding: '0 16px',
+                  gap: '10px',
+                }}
+                inputStyle={{
+                  flex: 1,
+                  padding: '16px 0',
+                  fontSize: '14px',
+                  color: '#0f172a',
+                }}
+                dropdownStyle={{ borderRadius: '16px', zIndex: 1000 }}
               />
-            </div>
-            <button style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '16px', padding: '16px 22px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}>
+            ) : (
+              <div style={{ flex: '1 1 420px', display: 'flex', alignItems: 'center', gap: '10px', background: '#f8fafc', border: '1.5px solid #e2e8f0', borderRadius: '16px', padding: '0 16px' }}>
+                <SearchBarIcon />
+                <input
+                  type="text"
+                  disabled
+                  placeholder="Loading search…"
+                  style={{ flex: 1, border: 'none', background: 'transparent', padding: '16px 0', outline: 'none', fontSize: '14px', color: '#94a3b8', fontFamily: "'Poppins', sans-serif" }}
+                />
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => handleSearchCommit(searchQuery)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '16px', padding: '16px 22px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+            >
               <SearchBarIcon color="#fff" />
               Search
             </button>
@@ -171,22 +261,116 @@ const SearchDashboard = () => {
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>Recent Searches</span>
-              {recentSearches.map((text) => (
-                <button key={text} type="button" onClick={() => setSearchQuery(text)} style={{ border: '1px solid #e2e8f0', background: '#ffffff', color: '#334155', borderRadius: '9999px', padding: '10px 14px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}>
-                  {text}
-                </button>
-              ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>Recent Searches</span>
+                  {recentSearches.length > 0 && (
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>
+                      {recentSearches.length} saved
+                    </span>
+                  )}
+                </div>
+                {recentSearches.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearRecent}
+                    style={{
+                      border: 'none', background: 'transparent', color: '#64748b',
+                      fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
+                      fontFamily: "'Poppins', sans-serif",
+                    }}
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              {recentSearches.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8', lineHeight: 1.5 }}>
+                  Your recent restaurant searches will appear here after you search.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                  {recentSearches.map((item) => (
+                    <button
+                      key={item.query}
+                      type="button"
+                      onClick={() => applySearch(item.query)}
+                      title={item.resultCount != null ? `${item.resultCount} results` : undefined}
+                      style={{
+                        border: '1px solid #e2e8f0',
+                        background: '#ffffff',
+                        color: '#334155',
+                        borderRadius: '9999px',
+                        padding: '10px 14px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        fontWeight: 500,
+                        fontFamily: "'Poppins', sans-serif",
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        maxWidth: '100%',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      </svg>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.query}</span>
+                      {item.lastSearchedAt && (
+                        <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500, flexShrink: 0 }}>
+                          {formatRelativeSearchTime(item.lastSearchedAt)}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>Trending Now</span>
-              {trendingTags.map((text) => (
-                <button key={text} type="button" onClick={() => setSearchQuery(text)} style={{ borderRadius: '9999px', background: '#eff6ff', border: 'none', color: '#1d4ed8', padding: '10px 14px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', boxShadow: '0 2px 10px rgba(37,99,235,0.08)' }}>
-                  {text}
-                </button>
-              ))}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>Trending in Pakistan</span>
+                <span style={{
+                  fontSize: '10px', fontWeight: 700, color: '#1d4ed8', background: '#eff6ff',
+                  padding: '3px 8px', borderRadius: '9999px',
+                }}>
+                  Popular
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: 1.45 }}>
+                Quick picks — tap to search restaurants across Pakistan
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                {trendingTags.map((tag) => (
+                  <button
+                    key={tag.query}
+                    type="button"
+                    onClick={() => applySearch(tag.query)}
+                    style={{
+                      borderRadius: '9999px',
+                      background: 'linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%)',
+                      border: '1px solid #bfdbfe',
+                      color: '#1d4ed8',
+                      padding: '10px 16px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: "'Poppins', sans-serif",
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 2px 10px rgba(37,99,235,0.08)',
+                    }}
+                  >
+                    <span style={{ fontSize: '12px', lineHeight: 1 }}>↗</span>
+                    {tag.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </header>
@@ -209,9 +393,13 @@ const SearchDashboard = () => {
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '22px 28px 28px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '18px' }}>
-              {filteredRestaurants.length === 0 ? (
+              {isLoading ? (
                 <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: '#94a3b8', padding: '80px 0', fontSize: '15px' }}>
-                  No restaurants match this search.
+                  Searching restaurants…
+                </div>
+              ) : filteredRestaurants.length === 0 ? (
+                <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: '#94a3b8', padding: '80px 0', fontSize: '15px' }}>
+                  {error || (searchQuery.trim() ? 'No restaurants match this search.' : 'No nearby restaurants found. Try a search term.')}
                 </div>
               ) : (
                 filteredRestaurants.map((r) => (

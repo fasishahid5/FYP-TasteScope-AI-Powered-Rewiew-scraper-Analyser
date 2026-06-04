@@ -104,21 +104,6 @@ export const restaurants = [
     lat: 31.4550,
     lng: 74.3450,
   },
-  {
-    id: 8,
-    name: 'Subway',
-    location: 'Model Town, Lahore',
-    rating: 4.1,
-    sentiment: 73,
-    reviews: 1230,
-    cuisine: 'Sandwiches',
-    priceRange: '$',
-    waitTime: 12,
-    waitTimeLabel: '10-15 min',
-    image: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?w=800&h=600&fit=crop',
-    lat: 31.4827,
-    lng: 74.3239,
-  },
 ];
 
 export default restaurants;

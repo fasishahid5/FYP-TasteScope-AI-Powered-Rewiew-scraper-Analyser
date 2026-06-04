@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Select, { components } from 'react-select';
 import AsyncSelect from 'react-select/async';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
-import { restaurants } from '../data/restaurants';
+import { useRestaurants } from '../lib/useRestaurants';
 import worldCountries from 'world-countries';
 import { Country, City } from 'country-state-city';
 import {
@@ -102,6 +102,7 @@ const ProfilePage = () => {
   const [avatarPreview, setAvatarPreview] = useState(user.avatarUrl || null);
   const [coverPreview, setCoverPreview] = useState(user.coverUrl || null);
   const [isLoading, setIsLoading] = useState(true);
+  const { restaurants: restaurantsData = [] } = useRestaurants();
   const photoInputRef = useRef(null);
 
   // Fetch user profile from backend on mount
@@ -227,7 +228,7 @@ const ProfilePage = () => {
   const profileLocation = [user.city, user.country].filter(Boolean).join(', ') || 'Add your location';
   const joinedLabel = formatJoinDate(user.createdAt);
 
-  const favorites = restaurants.slice(0, 4);
+  const favorites = restaurantsData.slice(0, 4);
   const reviews = [{ id: 1, name: 'Review 1' }];
 
   const handleNav = (key) => {

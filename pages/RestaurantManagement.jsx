@@ -1,13 +1,10 @@
 import React from 'react';
 import AdminLayout from '../components/AdminLayout';
+import { useRestaurants } from '../lib/useRestaurants';
 
-const restaurants = [
-  { id: 1, name: 'Arcadian Cafe', owner: 'Ayesha Tariq', reviews: 324, status: 'Active' },
-  { id: 2, name: 'Butt Karahi', owner: 'Omar Sheikh', reviews: 210, status: 'Pending' },
-  { id: 3, name: 'KFC Lahore', owner: 'Sara Javed', reviews: 132, status: 'Active' },
-];
-
-const RestaurantManagement = () => (
+const RestaurantManagement = () => {
+  const { restaurants: restaurantsData = [] } = useRestaurants();
+  return (
   <AdminLayout
     pageTitle="Restaurant Management"
     pageDescription="View restaurant listings, manage review metrics and take action on restaurants."
@@ -30,7 +27,7 @@ const RestaurantManagement = () => (
             </tr>
           </thead>
           <tbody>
-            {restaurants.map((restaurant) => (
+            {restaurantsData.map((restaurant) => (
               <tr key={restaurant.id} style={{ borderTop: '1px solid #f1f5f9' }}>
                 <td style={{ padding: '16px 12px', color: '#0f172a' }}>{restaurant.name}</td>
                 <td style={{ padding: '16px 12px', color: '#475569' }}>{restaurant.owner}</td>
@@ -51,5 +48,6 @@ const RestaurantManagement = () => (
     </div>
   </AdminLayout>
 );
+};
 
 export default RestaurantManagement;

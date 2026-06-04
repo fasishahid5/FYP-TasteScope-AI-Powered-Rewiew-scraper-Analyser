@@ -1,5 +1,6 @@
 import React from 'react';
 import BusinessOwnerLayout from '../components/BusinessOwnerLayout';
+import RestaurantCard from '../components/RestaurantCard';
 
 const reviewSamples = [
   { id: 1, user: 'Aziz Khan', rating: 5, text: 'Amazing service and the flavors were spot on. Highly recommended!', date: 'Jun 1, 2026', sentiment: 'Positive' },
@@ -7,6 +8,45 @@ const reviewSamples = [
   { id: 3, user: 'Hamza Ali', rating: 3, text: 'Food was okay but delivery took longer than expected.', date: 'May 27, 2026', sentiment: 'Neutral' },
   { id: 4, user: 'Ayesha Rauf', rating: 2, text: 'Pizza crust was soggy and the order was missing toppings.', date: 'May 25, 2026', sentiment: 'Negative' },
   { id: 5, user: 'Bilal Shah', rating: 4, text: 'Cozy atmosphere and very friendly staff. Coffee was excellent.', date: 'May 22, 2026', sentiment: 'Positive' },
+];
+
+const restaurantSamples = [
+  {
+    id: 'r1',
+    name: 'MEG',
+    status: 'Open',
+    image: 'https://source.unsplash.com/800x600/?restaurant,dinner',
+    rating: 4.8,
+    category: 'Restaurant · $$',
+    address: '123 Main St, Cityville',
+    distance: '7.3 km',
+    totalReviews: '10,288 reviews',
+    sentiment: 'Negative 58%',
+  },
+  {
+    id: 'r2',
+    name: 'La Petite Table',
+    status: 'Open',
+    image: 'https://source.unsplash.com/800x600/?bistro',
+    rating: 4.6,
+    category: 'French · $$$',
+    address: '45 Rue de Paris',
+    distance: '3.2 km',
+    totalReviews: '342 reviews',
+    sentiment: 'Negative 22%',
+  },
+  {
+    id: 'r3',
+    name: 'Saffron House',
+    status: 'Closed',
+    image: 'https://source.unsplash.com/800x600/?indian-restaurant',
+    rating: 4.4,
+    category: 'Indian · $$',
+    address: '8 Spice Ave',
+    distance: '1.1 km',
+    totalReviews: '1,204 reviews',
+    sentiment: 'Negative 12%',
+  },
 ];
 
 const sentimentStyles = {
@@ -40,6 +80,28 @@ const ReviewsPage = () => {
             >
               Filter reviews
             </button>
+          </div>
+        </div>
+
+        <div>
+          <h3 style={{ margin: '8px 0 12px 0', fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Restaurants</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {restaurantSamples.map((r) => (
+              <div key={r.id} className="px-0">
+                <RestaurantCard
+                  name={r.name}
+                  status={r.status}
+                  image={r.image}
+                  rating={r.rating}
+                  category={r.category}
+                  address={r.address}
+                  distance={r.distance}
+                  totalReviews={r.totalReviews}
+                  sentiment={r.sentiment}
+                  onPrimaryAction={() => alert(`Primary action for ${r.name}`)}
+                />
+              </div>
+            ))}
           </div>
         </div>
 
