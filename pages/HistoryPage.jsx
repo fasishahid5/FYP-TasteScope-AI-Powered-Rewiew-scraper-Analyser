@@ -32,61 +32,6 @@ const filterOptions = [
   { id: 'searched', label: 'Searches' },
 ];
 
-// Dummy sample data if no real history exists
-const dummySampleHistory = [
-  {
-    id: 'dummy-1',
-    type: 'searched',
-    name: 'Butt Karahi',
-    query: 'butt karahi',
-    cuisine: 'Pakistani',
-    priceRange: '$',
-    rating: 4.4,
-    location: 'Lakshmi Chowk, Lahore',
-    distance: 2.1,
-    sentiment: 88,
-    reviews: 3210,
-    resultCount: 20,
-    status: 'Open',
-    time: Date.now() - 60000,
-    image: 'https://source.unsplash.com/400x300/?karahi,food',
-  },
-  {
-    id: 'dummy-2',
-    type: 'viewed',
-    name: 'Naan House',
-    cuisine: 'Indian',
-    priceRange: '$$',
-    rating: 4.6,
-    location: 'Mall Road, Lahore',
-    distance: 3.5,
-    sentiment: 78,
-    reviews: 2150,
-    status: 'Open',
-    time: Date.now() - 300000,
-    image: 'https://source.unsplash.com/400x300/?naan,restaurant',
-  },
-  {
-    id: 'dummy-3',
-    type: 'searched',
-    name: 'Pizza Hut',
-    query: 'pizza',
-    cuisine: 'Fast Food',
-    priceRange: '$$',
-    rating: 4.0,
-    location: 'Defense, Lahore',
-    distance: 5.2,
-    sentiment: 65,
-    reviews: 5420,
-    resultCount: 45,
-    status: 'Open',
-    time: Date.now() - 900000,
-    image: 'https://source.unsplash.com/400x300/?pizza,fastfood',
-  },
-];
-
-const initialHistory = [];
-
 const HistoryPage = () => {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
