@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import AutocompleteSearch from '../components/AutocompleteSearch';
+import RecentSearches from '../components/RecentSearches';
 import { useGoogleRestaurantSearch } from '../lib/useGoogleRestaurantSearch';
+import { logSearchClickToDatabase, logSearchToDatabase } from '../lib/searchHistoryService';
 import {
   clearRecentSearchQueries,
   formatRelativeSearchTime,
@@ -33,12 +35,62 @@ const getSentiment = (score) => {
   return { label: 'Negative', dot: '#ef4444', textColor: '#991b1b' };
 };
 
-const RestaurantCard = ({ r, inCompare, onToggleCompare }) => {
+const normalizeDetailsKey = (value) => String(value || '').toLowerCase().trim();
+
+const toHistoryRestaurantDetails = (restaurant = null) => {
+  if (!restaurant || typeof restaurant !== 'object') return null;
+
+  return {
+    restaurantId: restaurant.restaurantId || restaurant.placeId || restaurant.id || null,
+    placeId: restaurant.placeId || restaurant.id || null,
+    name: restaurant.name,
+    cuisine: restaurant.cuisine,
+    priceRange: restaurant.priceRange,
+    rating: restaurant.rating,
+    location: restaurant.location || restaurant.address,
+    sentiment: restaurant.sentiment,
+    reviews: restaurant.reviews,
+    image: restaurant.image,
+    lat: restaurant.lat,
+    lng: restaurant.lng,
+  };
+};
+
+const findSelectedRestaurantResult = (restaurants = [], selectedDetails = null) => {
+  if (!selectedDetails) return null;
+
+  const selectedId = normalizeDetailsKey(
+    selectedDetails.restaurantId || selectedDetails.placeId || selectedDetails.id
+  );
+  const selectedName = normalizeDetailsKey(selectedDetails.name);
+  const selectedLocation = normalizeDetailsKey(selectedDetails.location || selectedDetails.address);
+
+  return (Array.isArray(restaurants) ? restaurants : []).find((restaurant) => {
+    const restaurantId = normalizeDetailsKey(
+      restaurant?.restaurantId || restaurant?.placeId || restaurant?.id
+    );
+    const restaurantName = normalizeDetailsKey(restaurant?.name);
+    const restaurantLocation = normalizeDetailsKey(restaurant?.location || restaurant?.address);
+
+    if (selectedId && restaurantId === selectedId) return true;
+    if (
+      selectedName
+      && restaurantName === selectedName
+      && (!selectedLocation || restaurantLocation.includes(selectedLocation) || selectedLocation.includes(restaurantLocation))
+    ) {
+      return true;
+    }
+
+    return false;
+  }) || null;
+};
+
+const RestaurantCard = ({ r, inCompare, onToggleCompare, onRestaurantClick }) => {
   const sentiment = getSentiment(r.sentiment);
   return (
-    <div style={{
+    <div onClick={() => onRestaurantClick(r)} style={{
       background: '#fff', borderRadius: '22px', overflow: 'hidden', boxShadow: '0 12px 30px rgba(15,23,42,0.08)',
-      border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', minHeight: '314px',
+      border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', minHeight: '314px', cursor: 'pointer',
     }}>
       <div style={{ position: 'relative', minHeight: '190px' }}>
         <img src={r.image} alt={r.name} style={{ width: '100%', height: '190px', objectFit: 'cover' }} />
@@ -46,7 +98,7 @@ const RestaurantCard = ({ r, inCompare, onToggleCompare }) => {
           <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
           {r.status || 'Open'}
         </div>
-        <button type="button" onClick={() => onToggleCompare(r.id)} style={{ position: 'absolute', top: '14px', right: '14px', width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: inCompare ? '#2563eb' : 'rgba(255,255,255,0.96)', color: inCompare ? '#fff' : '#334155', fontSize: '18px', cursor: 'pointer', boxShadow: '0 10px 24px rgba(15,23,42,0.14)' }}>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onToggleCompare(r.id); }} style={{ position: 'absolute', top: '14px', right: '14px', width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: inCompare ? '#2563eb' : 'rgba(255,255,255,0.96)', color: inCompare ? '#fff' : '#334155', fontSize: '18px', cursor: 'pointer', boxShadow: '0 10px 24px rgba(15,23,42,0.14)' }}>
           {inCompare ? '✓' : '+'}
         </button>
       </div>
@@ -94,7 +146,7 @@ const SearchDashboard = () => {
   });
   const [recentSearches, setRecentSearches] = useState([]);
   const [trendingTags, setTrendingTags] = useState([]);
-  const [pendingSearchQuery, setPendingSearchQuery] = useState('');
+  const [pendingSearch, setPendingSearch] = useState(null);
   const pendingSearchKeyRef = useRef('');
 
   const { restaurants: restaurantsData, isLoading, error, mapsReady, userLocation } =
@@ -134,25 +186,76 @@ const SearchDashboard = () => {
   }, [filteredRestaurants]);
 
   useEffect(() => {
-    const q = pendingSearchQuery.trim();
-    if (q.length < 2) return;
+    const q = String(pendingSearch?.query || '').trim();
+    if (q.length < 2 || isLoading) return;
 
-    const key = q.toLowerCase();
+    const selectedRestaurantDetails = pendingSearch?.selectedRestaurantDetails
+      ? toHistoryRestaurantDetails(pendingSearch.selectedRestaurantDetails)
+      : null;
+    const resultsShown = filteredRestaurants
+      .map(toHistoryRestaurantDetails)
+      .filter(Boolean);
+    const matchedSelectedRestaurant = selectedRestaurantDetails
+      ? findSelectedRestaurantResult(filteredRestaurants, selectedRestaurantDetails)
+      : null;
+    const fallbackRestaurantDetails = resultsShown[0] || null;
+    const historyRestaurantDetails =
+      toHistoryRestaurantDetails(matchedSelectedRestaurant)
+      || selectedRestaurantDetails
+      || fallbackRestaurantDetails;
+
+    const key = `${q.toLowerCase()}|${historyRestaurantDetails?.restaurantId || historyRestaurantDetails?.placeId || 'query-only'}|${pendingSearch?.submittedAt || 0}`;
+
     if (pendingSearchKeyRef.current === key) return;
     pendingSearchKeyRef.current = key;
 
-    // Pass first restaurant result details to history
-    logSearchQuery(q, filteredRestaurants.length, filteredRestaurants[0] || null);
+    logSearchQuery(q, filteredRestaurants.length, historyRestaurantDetails);
+    logSearchToDatabase(q, filteredRestaurants.length, historyRestaurantDetails, resultsShown);
     refreshSearchInsights();
-    setPendingSearchQuery('');
-  }, [pendingSearchQuery, filteredRestaurants, refreshSearchInsights]);
+    setPendingSearch(null);
+  }, [filteredRestaurants, isLoading, pendingSearch, refreshSearchInsights]);
 
-  const handleSearchCommit = useCallback((query) => {
+  const handleSearchCommit = useCallback((payload) => {
+    const searchObj = typeof payload === 'object' && payload !== null ? payload : null;
+    const query = searchObj?.query ?? payload;
+    const selectedRestaurantDetails = searchObj?.selectedRestaurantDetails || searchObj?.details || null;
+
     const q = String(query || '').trim();
     if (q.length < 2) return;
+
     setSearchQuery(q);
-    setPendingSearchQuery(q);
+    setPendingSearch({ query: q, selectedRestaurantDetails, submittedAt: Date.now() });
   }, []);
+
+  const handleRestaurantClick = useCallback((restaurant) => {
+    const selectedRestaurant = toHistoryRestaurantDetails(restaurant);
+    const query = String(searchQuery || '').trim();
+    if (query.length < 2 || !selectedRestaurant) return;
+
+    const resultsShown = filteredRestaurants
+      .map(toHistoryRestaurantDetails)
+      .filter(Boolean);
+    const selectedId = normalizeDetailsKey(selectedRestaurant.restaurantId || selectedRestaurant.placeId);
+    const selectedName = normalizeDetailsKey(selectedRestaurant.name);
+    const position = Math.max(
+      1,
+      resultsShown.findIndex((result) => {
+        const resultId = normalizeDetailsKey(result.restaurantId || result.placeId);
+        const resultName = normalizeDetailsKey(result.name);
+        return (selectedId && resultId === selectedId) || (selectedName && resultName === selectedName);
+      }) + 1
+    );
+
+    logSearchQuery(query, filteredRestaurants.length, selectedRestaurant);
+    logSearchClickToDatabase({
+      query,
+      selectedRestaurant,
+      resultsShown,
+      position,
+    });
+    refreshSearchInsights();
+  }, [filteredRestaurants, refreshSearchInsights, searchQuery]);
+
 
   const handleClearRecent = () => {
     clearRecentSearchQueries();
@@ -262,73 +365,17 @@ const SearchDashboard = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '13px', fontWeight: 700, color: '#334155' }}>Recent Searches</span>
-                  {recentSearches.length > 0 && (
-                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>
-                      {recentSearches.length} saved
-                    </span>
-                  )}
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500 }}>
+                    From your history
+                  </span>
                 </div>
-                {recentSearches.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleClearRecent}
-                    style={{
-                      border: 'none', background: 'transparent', color: '#64748b',
-                      fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: '4px 0',
-                      fontFamily: "'Poppins', sans-serif",
-                    }}
-                  >
-                    Clear all
-                  </button>
-                )}
               </div>
 
-              {recentSearches.length === 0 ? (
-                <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8', lineHeight: 1.5 }}>
-                  Your recent restaurant searches will appear here after you search.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                  {recentSearches.map((item) => (
-                    <button
-                      key={item.query}
-                      type="button"
-                      onClick={() => applySearch(item.query)}
-                      title={item.resultCount != null ? `${item.resultCount} results` : undefined}
-                      style={{
-                        border: '1px solid #e2e8f0',
-                        background: '#ffffff',
-                        color: '#334155',
-                        borderRadius: '9999px',
-                        padding: '10px 14px',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        fontWeight: 500,
-                        fontFamily: "'Poppins', sans-serif",
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        maxWidth: '100%',
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                        <circle cx="11" cy="11" r="8" />
-                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      </svg>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.query}</span>
-                      {item.lastSearchedAt && (
-                        <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500, flexShrink: 0 }}>
-                          {formatRelativeSearchTime(item.lastSearchedAt)}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <RecentSearches limit={6} onSearchSelect={(query) => { handleSearchCommit(query); }} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -403,7 +450,13 @@ const SearchDashboard = () => {
                 </div>
               ) : (
                 filteredRestaurants.map((r) => (
-                  <RestaurantCard key={r.id} r={r} inCompare={compareList.includes(r.id)} onToggleCompare={toggleCompare} />
+                  <RestaurantCard
+                    key={r.id}
+                    r={r}
+                    inCompare={compareList.includes(r.id)}
+                    onToggleCompare={toggleCompare}
+                    onRestaurantClick={handleRestaurantClick}
+                  />
                 ))
               )}
             </div>

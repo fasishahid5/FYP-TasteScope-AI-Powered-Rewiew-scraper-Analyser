@@ -103,16 +103,10 @@ function AutocompleteSearch({
   }, []);
 
   const handlePredictionClick = (prediction) => {
-    const brandQuery =
-      prediction.structured_formatting?.main_text ||
-      prediction.description.split(',')[0].trim();
+    const { name, location } = formatPredictionLabel(prediction);
+    const brandQuery = name || prediction.description.split(',')[0].trim();
     setSearchQuery(brandQuery);
     setShowDropdown(false);
-
-    // Log search when user clicks on location from dropdown
-    if (onSubmit && brandQuery.trim().length >= 2) {
-      onSubmit(brandQuery.trim());
-    }
 
     if (!placesService.current) return;
 
@@ -126,6 +120,37 @@ function AutocompleteSearch({
         ],
       },
       (place, status) => {
+        const getPhotoUrl = () => {
+          try {
+            return place?.photos?.[0]?.getUrl({ maxWidth: 800, maxHeight: 600 }) || '';
+          } catch {
+            return '';
+          }
+        };
+
+        const selectedRestaurantDetails = {
+          restaurantId: prediction.place_id,
+          placeId: prediction.place_id,
+          name: place?.name || brandQuery,
+          location: place?.formatted_address || location || '',
+          rating: place?.rating ?? null,
+          reviews: place?.user_ratings_total ?? null,
+          priceRange: place?.price_level ? '$'.repeat(Math.min(place.price_level, 4)) : '',
+          image: getPhotoUrl(),
+          cuisine: Array.isArray(place?.types)
+            ? place.types.find((type) => !['establishment', 'point_of_interest', 'food', 'restaurant'].includes(type))?.replace(/_/g, ' ')
+            : '',
+          lat: place?.geometry?.location?.lat?.() ?? null,
+          lng: place?.geometry?.location?.lng?.() ?? null,
+        };
+
+        if (onSubmit && brandQuery.trim().length >= 2) {
+          onSubmit({
+            query: brandQuery.trim(),
+            selectedRestaurantDetails,
+          });
+        }
+
         if (status !== window.google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) {
           return;
         }
@@ -141,9 +166,9 @@ function AutocompleteSearch({
           onPlaceSelected({
             lat,
             lng,
-            name: place.name || place.formatted_address,
-            address: place.formatted_address,
-            rating: place.rating,
+            name: selectedRestaurantDetails.name,
+            address: selectedRestaurantDetails.location,
+            rating: selectedRestaurantDetails.rating,
             reviews: place.reviews,
             userRatingsTotal: place.user_ratings_total,
             photos: place.photos,
@@ -154,6 +179,9 @@ function AutocompleteSearch({
             phoneNumber: place.formatted_phone_number,
             url: place.url,
             placeId: prediction.place_id,
+            image: selectedRestaurantDetails.image,
+            cuisine: selectedRestaurantDetails.cuisine,
+            priceRange: selectedRestaurantDetails.priceRange,
           });
         }
       }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BusinessOwnerLayout from '../components/BusinessOwnerLayout';
 import RestaurantCard from '../components/RestaurantCard';
+import { getStoredToken, getStoredUser, handleExpiredAuthSession } from '../lib/auth';
 
 const sentimentMap = {
   'positive': 'Positive',
@@ -18,11 +19,19 @@ const ReviewsPage = () => {
     const fetchReviews = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('authToken');
+        const token = getStoredToken() || getStoredUser()?.token || null;
+        if (!token) {
+          throw new Error('Missing authentication token');
+        }
         const response = await fetch('/api/business/reviews', {
           headers: { Authorization: `Bearer ${token}` },
         });
-        
+
+        if (response.status === 401 || response.status === 403) {
+          handleExpiredAuthSession();
+          return;
+        }
+
         if (!response.ok) throw new Error('Failed to fetch reviews');
         const data = await response.json();
         setReviews(data.reviews || []);

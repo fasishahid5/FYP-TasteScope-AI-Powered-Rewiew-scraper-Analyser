@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BusinessOwnerLayout from '../components/BusinessOwnerLayout';
+import { getStoredToken, getStoredUser, handleExpiredAuthSession } from '../lib/auth';
 
 const BusinessDashboard = () => {
   const navigate = useNavigate();
@@ -19,17 +20,25 @@ const BusinessDashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('authToken');
+        const token = getStoredToken() || getStoredUser()?.token || null;
         console.log('Auth token present:', !!token);
-        
+
+        if (!token) {
+          throw new Error('Missing authentication token');
+        }
+
         const headers = {
           'Content-Type': 'application/json',
-          ...(token && { Authorization: `Bearer ${token}` }),
+          Authorization: `Bearer ${token}`,
         };
 
         // Test the connection first
         console.log('Testing API connection...');
         const testRes = await fetch('/api/business/test', { headers });
+        if (testRes.status === 401 || testRes.status === 403) {
+          handleExpiredAuthSession();
+          return;
+        }
         const testData = await testRes.json();
         console.log('API test response:', testData);
 
@@ -40,6 +49,11 @@ const BusinessDashboard = () => {
           fetch('/api/business/reviews/recent', { headers }),
           fetch('/api/business/analytics', { headers }),
         ]);
+
+        if ([overviewRes.status, recentReviewsRes.status, analyticsRes.status].some((status) => status === 401 || status === 403)) {
+          handleExpiredAuthSession();
+          return;
+        }
 
         console.log('Response statuses:', {
           overview: overviewRes.status,

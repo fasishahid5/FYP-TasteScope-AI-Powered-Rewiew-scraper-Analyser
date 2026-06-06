@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import { useRestaurants } from '../lib/useRestaurants';
 import { logCompare } from '../lib/historyService';
-import { getStoredUser } from '../lib/auth';
+import { saveComparisonToDatabase } from '../lib/searchHistoryService';
 
 // ── LOCALSTORE HELPERS
 const readLS = (key, fallback) => {
@@ -173,12 +173,69 @@ const CompareDashboard = () => {
   useEffect(() => { writeLS('ts_compareList', compareList); }, [compareList]);
 
   const lastLoggedRef = useRef('');
+  const hasCompareInteractionRef = useRef(false);
   useEffect(() => {
-    const key = [...compareList].sort().join(',');
-    if (compareList.length >= 2 && lastLoggedRef.current !== key) {
-      const sel = compareList.map(id => restaurantPool.find(r => String(r.id) === String(id))).filter(Boolean);
-      if (sel.length >= 2) { try { logCompare(sel); lastLoggedRef.current = key; } catch {} }
+    if (!hasCompareInteractionRef.current) {
+      return;
     }
+
+    if (compareList.length < 2) {
+      lastLoggedRef.current = '';
+      return;
+    }
+
+    const saveComparison = async () => {
+      const key = [...compareList].sort().join(',');
+      if (compareList.length >= 2 && lastLoggedRef.current !== key) {
+        const sel = compareList.map(id => restaurantPool.find(r => String(r.id) === String(id))).filter(Boolean);
+        if (sel.length >= 2) {
+          logCompare(sel);
+          try {
+            const result = await saveComparisonToDatabase(
+              String(sel[0].id),
+              String(sel[1].id),
+              `Compared ${sel.map(r => r.name).join(' with ')}`,
+              {
+                restaurantId: String(sel[0].id),
+                name: sel[0].name,
+                image: sel[0].image,
+                cuisine: sel[0].cuisine,
+                priceRange: sel[0].priceRange,
+                rating: sel[0].rating,
+                location: sel[0].location,
+                sentiment: sel[0].sentiment,
+                reviews: sel[0].reviews,
+                lat: sel[0].lat,
+                lng: sel[0].lng,
+                placeId: sel[0].placeId,
+              },
+              {
+                restaurantId: String(sel[1].id),
+                name: sel[1].name,
+                image: sel[1].image,
+                cuisine: sel[1].cuisine,
+                priceRange: sel[1].priceRange,
+                rating: sel[1].rating,
+                location: sel[1].location,
+                sentiment: sel[1].sentiment,
+                reviews: sel[1].reviews,
+                lat: sel[1].lat,
+                lng: sel[1].lng,
+                placeId: sel[1].placeId,
+              }
+            );
+            if (!result) {
+              console.warn('Comparison save returned no result');
+            }
+          } catch (err) {
+            console.error('Error saving comparison to database:', err);
+          }
+          lastLoggedRef.current = key;
+        }
+      }
+    };
+
+    saveComparison();
   }, [compareList, restaurantPool]);
 
   const handleSidebarNavClick = (id) => {
@@ -196,10 +253,16 @@ const CompareDashboard = () => {
     .filter(Boolean);
 
   const handleAddRestaurant = (id) => {
-    if (compareList.length < 4 && !compareList.includes(id)) setCompareList([...compareList, id]);
+    if (compareList.length < 4 && !compareList.includes(id)) {
+      hasCompareInteractionRef.current = true;
+      setCompareList([...compareList, id]);
+    }
   };
 
-  const handleRemove = (id) => setCompareList(compareList.filter(x => x !== id));
+  const handleRemove = (id) => {
+    hasCompareInteractionRef.current = true;
+    setCompareList(compareList.filter(x => x !== id));
+  };
 
   const winner = useMemo(() => {
     if (selectedRestaurants.length < 2) return null;

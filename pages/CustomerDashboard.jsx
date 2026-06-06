@@ -5,6 +5,7 @@ import GoogleMapView from '../components/GoogleMapView';
 import AutocompleteSearch from '../components/AutocompleteSearch';
 import { useRestaurants } from '../lib/useRestaurants';
 import { getStoredUser } from '../lib/auth';
+import { logVisitToDatabase, toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
 
 // Filter icon for the filter button.
 const FilterIcon = () => (
@@ -390,6 +391,20 @@ const CustomerDashboard = () => {
       placeId: String(r.id),
     });
     setSelectedSearchPlace({ lat: r.lat, lng: r.lng, name: r.name });
+    logVisitToDatabase(String(r.id), {
+      restaurantId: String(r.id),
+      name: r.name,
+      image: r.image,
+      cuisine: r.cuisine,
+      priceRange: r.priceRange,
+      rating: r.rating,
+      location: r.location,
+      sentiment: r.sentiment,
+      reviews: r.reviews,
+      lat: r.lat,
+      lng: r.lng,
+      placeId: String(r.id),
+    });
     if (listPanelRef.current) listPanelRef.current.scrollTop = 0;
   };
 
@@ -517,6 +532,7 @@ const CustomerDashboard = () => {
                 });
                 // Store full place details for card display
                 setSelectedPlaceDetails(placeData);
+                logVisitToDatabase(placeData.placeId || placeData.id || placeData.name, placeData);
               }} 
             />
 
@@ -587,6 +603,8 @@ const CustomerDashboard = () => {
               <FilterIcon />
             </button>
           </div>
+
+
         </header>
 
         {/* Body: Google Map on left, restaurant list on right */}
@@ -1083,6 +1101,14 @@ const CustomerDashboard = () => {
                           borderRadius: '8px', border: '1.5px solid #ec4899',
                           background: '#fff', color: '#ec4899',
                           cursor: 'pointer', transition: 'all 0.2s ease',
+                        }}
+                        onClick={() => {
+                          if (selectedPlaceDetails?.placeId || selectedPlaceDetails?.id) {
+                            toggleFavoriteRestaurant(
+                              String(selectedPlaceDetails.placeId || selectedPlaceDetails.id),
+                              selectedPlaceDetails
+                            );
+                          }
                         }}
                         onMouseEnter={(e) => e.target.style.background = '#fce7f3'}
                         onMouseLeave={(e) => e.target.style.background = '#fff'}
