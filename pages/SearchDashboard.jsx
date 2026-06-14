@@ -13,7 +13,8 @@ import {
   logSearchQuery,
 } from '../lib/searchInsights';
 import { getStoredUser } from '../lib/auth';
-import { getFavoritesList, toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
+import { toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
+import { useAppContext } from '../src/context/AppContext';
 
 const SearchBarIcon = ({ color = '#94a3b8' }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -159,15 +160,18 @@ const SearchDashboard = () => {
   const [recentSearches, setRecentSearches] = useState([]);
   const [trendingTags, setTrendingTags] = useState([]);
   const [pendingSearch, setPendingSearch] = useState(null);
-  const [favoriteIds, setFavoriteIds] = useState([]);
+  const [recentSearchesRefreshKey, setRecentSearchesRefreshKey] = useState(0);
   const pendingSearchKeyRef = useRef('');
 
   const { restaurants: restaurantsData, isLoading, error, mapsReady, userLocation } =
     useGoogleRestaurantSearch(searchQuery);
 
+  const { favoriteIds, refreshGlobalHistoryData, toggleGlobalFavorite, setFavoriteIds } = useAppContext();
+
   const refreshSearchInsights = useCallback(() => {
     setRecentSearches(getRecentSearchQueries(6));
     setTrendingTags(getTrendingSearchTags(6));
+    setRecentSearchesRefreshKey((prev) => prev + 1);
   }, []);
 
   const getRestaurantIdentifier = useCallback((restaurant) => {
@@ -175,35 +179,24 @@ const SearchDashboard = () => {
     return String(restaurant.restaurantId || restaurant.placeId || restaurant.id || '').trim();
   }, []);
 
-  const loadFavoriteIds = useCallback(async () => {
-    const favorites = await getFavoritesList();
-    if (Array.isArray(favorites)) {
-      setFavoriteIds(favorites.map((id) => String(id)));
-    }
-  }, []);
-
   const handleToggleFavorite = useCallback(async (restaurant) => {
     const restaurantId = getRestaurantIdentifier(restaurant);
     if (!restaurantId) return;
+
     const result = await toggleFavoriteRestaurant(restaurantId, restaurant);
     if (result && Array.isArray(result.favorites)) {
-      setFavoriteIds(result.favorites.map((id) => String(id)));
-    } else {
-      await loadFavoriteIds();
+      const newFavoriteIds = result.favorites.map((id) => String(id));
+      setFavoriteIds(newFavoriteIds);
+      toggleGlobalFavorite(restaurantId, restaurant, newFavoriteIds.includes(restaurantId));
     }
-  }, [getRestaurantIdentifier, loadFavoriteIds]);
+
+    await refreshGlobalHistoryData();
+  }, [getRestaurantIdentifier, refreshGlobalHistoryData, setFavoriteIds, toggleGlobalFavorite]);
 
   useEffect(() => {
     refreshSearchInsights();
-    window.addEventListener('historyUpdated', refreshSearchInsights);
-    return () => window.removeEventListener('historyUpdated', refreshSearchInsights);
-  }, [refreshSearchInsights]);
-
-  useEffect(() => {
-    loadFavoriteIds();
-    window.addEventListener('historyUpdated', loadFavoriteIds);
-    return () => window.removeEventListener('historyUpdated', loadFavoriteIds);
-  }, [loadFavoriteIds]);
+    refreshGlobalHistoryData();
+  }, [refreshSearchInsights, refreshGlobalHistoryData]);
 
   const filteredRestaurants = useMemo(() => {
     let list = [...restaurantsData];
@@ -417,7 +410,11 @@ const SearchDashboard = () => {
                 </div>
               </div>
 
-              <RecentSearches limit={6} onSearchSelect={(query) => { handleSearchCommit(query); }} />
+              <RecentSearches
+              limit={6}
+              refreshKey={recentSearchesRefreshKey}
+              onSearchSelect={(query) => { handleSearchCommit(query); }}
+            />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

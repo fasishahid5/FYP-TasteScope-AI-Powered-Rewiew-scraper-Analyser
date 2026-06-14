@@ -1,15 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { fetchRecentSearches, formatRelativeTime, deleteSearchFromHistory } from '../lib/searchHistoryService';
 
-const RecentSearches = ({ onSearchSelect, limit = 6 }) => {
+const RecentSearches = ({ onSearchSelect, limit = 6, refreshKey = 0 }) => {
   const [searches, setSearches] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadRecentSearches();
-    window.addEventListener('historyUpdated', loadRecentSearches);
-    return () => window.removeEventListener('historyUpdated', loadRecentSearches);
-  }, [limit]);
+  }, [limit, refreshKey]);
 
   const loadRecentSearches = async () => {
     setLoading(true);

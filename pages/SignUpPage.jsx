@@ -53,9 +53,9 @@ const SignUpPage = ({ onLoginClick, onBackClick }) => {
       });
 
       if (response.ok) {
-        // This shows success and sends user to login page.
+        // This shows success and sends user to login page without a hard reload.
         alert('Registration successful! Please check your email to verify your account.');
-        window.location.href = '/login';
+        onLoginClick();
       } else {
         const data = await response.json();
         setError(data.msg || 'Sign up failed');

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import { useRestaurants } from '../lib/useRestaurants';
 import { useGoogleRestaurantSearch } from '../lib/useGoogleRestaurantSearch';
+import { useAppContext } from '../src/context/AppContext';
 import { fetchUnifiedHistory, toggleFavoriteRestaurant, clearUnifiedHistory, deleteUnifiedHistoryItem } from '../lib/unifiedHistoryService';
 import { generateFallbackReviewData } from '../src/utils/reviewHelpers';
 
@@ -655,14 +656,24 @@ const HistoryPage = () => {
   const [detailItem, setDetailItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
   const { restaurants: restaurantsData = [] } = useRestaurants();
+  const {
+    globalHistoryData,
+    setGlobalHistoryData,
+    refreshGlobalHistoryData,
+  } = useAppContext();
 
   // Load data from database
-  const [historyData, setHistoryData] = useState({
+  const [historyData, setHistoryData] = useState(() => globalHistoryData || {
     history: [],
     stats: null,
   });
-  const [favorites, setFavorites] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [favorites, setFavorites] = useState(() => {
+    const cached = globalHistoryData?.history || [];
+    return (cached || [])
+      .filter((item) => item.type === 'favorite')
+      .map((item) => String(item.restaurantId || item._id));
+  });
+  const [loading, setLoading] = useState(!globalHistoryData?.history?.length);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [toast, setToast] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
@@ -698,41 +709,24 @@ const HistoryPage = () => {
     return lookup;
   }, [restaurantsData]);
 
-  // Load unified history and favorites on mount
   useEffect(() => {
     const loadHistory = async () => {
-      setLoading(true);
-      try {
-        const data = await fetchUnifiedHistory();
-        if (data) {
-          setHistoryData(data);
-          setFavorites((data.history || []).filter((item) => item.type === 'favorite').map((item) => String(item.restaurantId || item._id)));
-        }
-      } catch (error) {
-        console.error('Error loading history:', error);
-        setHistoryData({ history: [], stats: { searches: 0, clicks: 0, comparisons: 0, favorites: 0, visits: 0 } });
-        setFavorites([]);
-      } finally {
-        setLoading(false);
+      const data = await refreshGlobalHistoryData();
+      if (data) {
+        setHistoryData(data);
+        const favoriteIds = (data.history || [])
+          .filter((item) => item.type === 'favorite')
+          .map((item) => String(item.restaurantId || item._id));
+        setFavorites(favoriteIds);
       }
     };
-    loadHistory();
-  }, []);
 
-  useEffect(() => {
-    const refreshHistory = async () => {
-      const data = await fetchUnifiedHistory();
-      setHistoryData(data);
-      setFavorites((data.history || []).filter((item) => item.type === 'favorite').map((item) => String(item.restaurantId || item._id)));
-    };
+    if (!globalHistoryData?.history?.length) {
+      setLoading(true);
+    }
 
-    const handleHistoryUpdated = () => {
-      refreshHistory();
-    };
-
-    window.addEventListener('historyUpdated', handleHistoryUpdated);
-    return () => window.removeEventListener('historyUpdated', handleHistoryUpdated);
-  }, []);
+    loadHistory().finally(() => setLoading(false));
+  }, [globalHistoryData?.history?.length, refreshGlobalHistoryData]);
 
   const historyItems = useMemo(() => {
     return (historyData.history || []).map((item) => normalizeHistoryItem(item, restaurantLookup));

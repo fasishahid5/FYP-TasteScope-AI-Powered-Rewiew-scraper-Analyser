@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import { SettingsProvider } from './lib/SettingsContext';
+import { AppProvider } from './src/context/AppContext';
 
 // This creates and renders the React app in the root element.
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -11,9 +12,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {/* BrowserRouter enables page routing in the app. */}
     <BrowserRouter>
-      <SettingsProvider>
-        <App />
-      </SettingsProvider>
+      <AppProvider>
+        <SettingsProvider>
+          <App />
+        </SettingsProvider>
+      </AppProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

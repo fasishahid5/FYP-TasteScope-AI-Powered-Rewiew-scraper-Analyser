@@ -15,7 +15,8 @@ import {
   normalizeRole,
   setStoredAuth,
 } from '../lib/auth';
-import { fetchUnifiedHistory, getFavoritesList, removeFromFavorites } from '../lib/unifiedHistoryService';
+import { removeFromFavorites } from '../lib/unifiedHistoryService';
+import { useAppContext } from '../src/context/AppContext';
 
 const countryCodeToFlag = (isoCode = '') => {
   if (!isoCode || typeof isoCode !== 'string') return '🏳️';
@@ -142,22 +143,41 @@ const ProfilePage = () => {
   const [saveState, setSaveState] = useState({ isSaving: false, error: '', success: '' });
   const [avatarPreview, setAvatarPreview] = useState(user.avatarUrl || null);
   const [coverPreview, setCoverPreview] = useState(user.coverUrl || null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isMetricsLoading, setIsMetricsLoading] = useState(true);
-  const [profileStats, setProfileStats] = useState({ visits: 0, comparisons: 0, searches: 0 });
-  const [favoritesCount, setFavoritesCount] = useState(0);
-  const [favoriteRestaurants, setFavoriteRestaurants] = useState([]);
+  const {
+    notifications,
+    setNotifications,
+    globalLoading,
+    setGlobalLoading,
+    globalMetricsLoading,
+    setGlobalMetricsLoading,
+    globalProfileData,
+    refreshGlobalHistoryData,
+    toggleGlobalFavorite,
+  } = useAppContext();
+  const [isLoading, setIsLoading] = useState(!globalProfileData?.stats);
   const [removingFavoriteId, setRemovingFavoriteId] = useState(null);
+  const isMetricsLoading = globalMetricsLoading;
   const { restaurants: restaurantsData = [] } = useRestaurants();
   const showProfileSkeleton = isLoading || isMetricsLoading;
   const photoInputRef = useRef(null);
+
+  // Direct bindings to global context (no local state copies, true reactivity)
+  const profileStats = globalProfileData?.stats || { visits: 0, comparisons: 0, searches: 0 };
+  const favoritesCount = globalProfileData?.favoritesCount || 0;
+  const favoriteRestaurants = Array.isArray(globalProfileData?.favoriteRestaurants) ? globalProfileData.favoriteRestaurants : [];
+
+  // Update loading state when globalProfileData.stats is actually available
+  useEffect(() => {
+    if (globalProfileData?.stats) {
+      setIsLoading(false);
+    }
+  }, [globalProfileData?.stats]);
 
   // Fetch user profile from backend on mount
   useEffect(() => {
     const loadUserProfile = async () => {
       const token = getStoredToken();
       if (!token) {
-        setIsLoading(false);
         return;
       }
       try {
@@ -188,100 +208,37 @@ const ProfilePage = () => {
         }
       } catch (error) {
         console.error('Error loading profile:', error);
-      } finally {
-        setIsLoading(false);
       }
     };
     loadUserProfile();
   }, []);
 
+  // Load profile metrics (history/favorites/stats) from context
   useEffect(() => {
     let active = true;
 
     const loadProfileMetrics = async () => {
-      setIsMetricsLoading(true);
+      setGlobalMetricsLoading(true);
       try {
-        const historyData = await fetchUnifiedHistory();
-        const favorites = await getFavoritesList();
-
-        const allHistory = Array.isArray(historyData.history) ? historyData.history : [];
-        const favoriteItemsFromHistory = allHistory.filter((item) => item.type === 'favorite');
-        const favoritesOrder = Array.isArray(favorites) ? favorites.map((id) => String(id).trim()).filter(Boolean) : [];
-        const favoriteById = favoriteItemsFromHistory.reduce((acc, item) => {
-          const id = String(item.restaurantId || item._id || item.name || '').trim();
-          if (id) acc[id] = item;
-          return acc;
-        }, {});
-        const restaurantLookup = restaurantsData.reduce((acc, restaurant) => {
-          const id = String(restaurant.restaurantId || restaurant.placeId || restaurant.id || '').trim();
-          if (id) acc[id] = restaurant;
-          return acc;
-        }, {});
-
-        const favoriteItems = favoritesOrder.map((restaurantId, index) => {
-          const normalizedId = String(restaurantId);
-          if (favoriteById[normalizedId]) return favoriteById[normalizedId];
-
-          const matchedRestaurant = restaurantLookup[normalizedId];
-          if (matchedRestaurant) {
-            return {
-              _id: normalizedId,
-              type: 'favorite',
-              restaurantId: normalizedId,
-              name: matchedRestaurant.name || `Favorite ${index + 1}`,
-              details: {
-                ...matchedRestaurant,
-                name: matchedRestaurant.name || `Favorite ${index + 1}`,
-                location: matchedRestaurant.location || matchedRestaurant.address || 'Unknown location',
-                image: matchedRestaurant.image || matchedRestaurant.photo || matchedRestaurant.imageUrl || 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop&q=80',
-              },
-            };
-          }
-
-          return {
-            _id: normalizedId,
-            type: 'favorite',
-            restaurantId: normalizedId,
-            name: `Saved Favorite ${index + 1}`,
-            details: {
-              name: `Saved Favorite ${index + 1}`,
-              location: `Restaurant ID: ${normalizedId.slice(0, 20)}...`,
-              restaurantId: normalizedId,
-              image: 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop&q=80',
-            },
-          };
-        });
-
-        if (active) {
-          setProfileStats({
-            visits: historyData.stats?.visits || 0,
-            comparisons: historyData.stats?.comparisons || 0,
-            searches: historyData.stats?.searches || 0,
-          });
-          setFavoritesCount(favoritesOrder.length);
-          setFavoriteRestaurants(favoriteItems);
-        }
+        await refreshGlobalHistoryData();
+        // Context will auto-update from refreshGlobalHistoryData via AppContext logic
+        if (!active) return;
       } catch (err) {
         console.error('Error loading profile metrics:', err);
-        if (active) {
-          setProfileStats({ visits: 0, comparisons: 0, searches: 0 });
-          setFavoritesCount(0);
-          setFavoriteRestaurants([]);
-        }
       } finally {
-        if (active) setIsMetricsLoading(false);
+        if (!active) return;
+        setGlobalMetricsLoading(false);
       }
     };
 
-    const handleHistoryUpdated = () => loadProfileMetrics();
-    loadProfileMetrics();
-    window.addEventListener('historyUpdated', handleHistoryUpdated);
+    if (!globalProfileData?.stats) {
+      loadProfileMetrics();
+    }
 
     return () => {
       active = false;
-      window.removeEventListener('historyUpdated', handleHistoryUpdated);
     };
-  }, [restaurantsData]);
+  }, [globalProfileData?.stats, setGlobalMetricsLoading]);
 
   const handleRemoveFavorite = async (restaurantId) => {
     const normalizedId = String(restaurantId || '').trim();
@@ -290,10 +247,9 @@ const ProfilePage = () => {
     try {
       const result = await removeFromFavorites(normalizedId);
       if (result) {
-        setFavoriteRestaurants((current) =>
-          current.filter((item) => String(item.restaurantId || item._id) !== normalizedId)
-        );
-        setFavoritesCount((count) => Math.max(0, count - 1));
+        // Context will auto-update via toggleGlobalFavorite
+        toggleGlobalFavorite(normalizedId, null, false);
+        await refreshGlobalHistoryData();
       }
     } catch (error) {
       console.error('Failed to remove favorite:', error);

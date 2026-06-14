@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../lib/auth';
 import Logo from '../components/Logo';
 
 const ResetPasswordPage = ({ onBackClick }) => {
+  const navigate = useNavigate();
   // This state stores reset token from URL.
   const [token, setToken] = useState('');
   // These states store new password form values.
@@ -44,9 +46,9 @@ const ResetPasswordPage = ({ onBackClick }) => {
       const data = await response.json();
       if (response.ok) {
         setMessage(data.msg);
-        // This redirects user to login after success.
+        // Redirect to the login route without forcing a browser reload.
         setTimeout(() => {
-          window.location.href = '/login';
+          navigate('/login', { replace: true });
         }, 2000);
       } else {
         setError(data.msg || 'Reset failed');

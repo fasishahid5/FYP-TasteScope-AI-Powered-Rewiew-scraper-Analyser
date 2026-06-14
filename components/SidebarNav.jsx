@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { NavLink } from 'react-router-dom';
 import Logo from './Logo';
 
 const HomeIcon = ({ active }) => (
@@ -69,6 +70,7 @@ const navBtnStyle = (isActive, isHovered) => ({
   fontFamily: "'Poppins', sans-serif",
   transition: 'background 0.18s ease, color 0.18s ease, transform 0.18s ease',
   textAlign: 'left',
+  textDecoration: 'none',
   transform: isHovered && !isActive ? 'translateX(2px)' : 'translateX(0)',
 });
 
@@ -86,6 +88,15 @@ const SidebarNav = ({ activeItem, onNavigate, isSidebarOpen }) => {
     { id: 'profile', label: 'Profile', Icon: ProfileIcon },
     { id: 'settings', label: 'Settings', Icon: SettingsIcon },
   ];
+
+  const routeMap = {
+    home: '/dashboard',
+    search: '/search',
+    compare: '/compare',
+    history: '/history',
+    profile: '/profile',
+    settings: '/settings',
+  };
 
   const sidebarWidth = isSidebarOpen ? '264px' : '0px';
 
@@ -118,33 +129,47 @@ const SidebarNav = ({ activeItem, onNavigate, isSidebarOpen }) => {
 
         <nav style={{ flex: 1, padding: '14px 12px', overflowY: 'auto' }}>
           {mainNav.map(({ id, label, Icon }) => (
-            <button
+            <NavLink
               key={id}
-              type="button"
-              onClick={() => onNavigate(id)}
+              to={routeMap[id] || '/'}
+              end
+              style={({ isActive }) => navBtnStyle(isActive, hoveredNav === id)}
               onMouseEnter={() => setHoveredNav(id)}
               onMouseLeave={() => setHoveredNav(null)}
-              style={navBtnStyle(activeItem === id, hoveredNav === id)}
+              onClick={() => {
+                if (typeof onNavigate === 'function') onNavigate(id);
+              }}
             >
-              <Icon active={activeItem === id} />
-              {label}
-            </button>
+              {({ isActive }) => (
+                <>
+                  <Icon active={isActive} />
+                  {label}
+                </>
+              )}
+            </NavLink>
           ))}
         </nav>
 
         <div style={{ padding: '12px', borderTop: '1px solid #f1f5f9' }}>
           {bottomNav.map(({ id, label, Icon }) => (
-            <button
+            <NavLink
               key={id}
-              type="button"
-              onClick={() => onNavigate(id)}
+              to={routeMap[id] || '/'}
+              end
+              style={({ isActive }) => navBtnStyle(isActive, hoveredNav === id)}
               onMouseEnter={() => setHoveredNav(id)}
               onMouseLeave={() => setHoveredNav(null)}
-              style={navBtnStyle(activeItem === id, hoveredNav === id)}
+              onClick={() => {
+                if (typeof onNavigate === 'function') onNavigate(id);
+              }}
             >
-              <Icon active={activeItem === id} />
-              {label}
-            </button>
+              {({ isActive }) => (
+                <>
+                  <Icon active={isActive} />
+                  {label}
+                </>
+              )}
+            </NavLink>
           ))}
         </div>
       </div>
