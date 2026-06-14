@@ -13,6 +13,7 @@ import {
   logSearchQuery,
 } from '../lib/searchInsights';
 import { getStoredUser } from '../lib/auth';
+import { getFavoritesList, toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
 
 const SearchBarIcon = ({ color = '#94a3b8' }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -53,6 +54,14 @@ const toHistoryRestaurantDetails = (restaurant = null) => {
     image: restaurant.image,
     lat: restaurant.lat,
     lng: restaurant.lng,
+    naturalReview: restaurant.naturalReview,
+    aiOverview: restaurant.aiOverview,
+    aiVerdict: restaurant.aiVerdict,
+    insight: restaurant.insight,
+    naturalReviewSections: restaurant.naturalReviewSections,
+    source: restaurant.source,
+    model: restaurant.model,
+    isFallback: restaurant.isFallback,
   };
 };
 
@@ -85,7 +94,7 @@ const findSelectedRestaurantResult = (restaurants = [], selectedDetails = null) 
   }) || null;
 };
 
-const RestaurantCard = ({ r, inCompare, onToggleCompare, onRestaurantClick }) => {
+const RestaurantCard = ({ r, inCompare, onToggleCompare, onRestaurantClick, isFavorite, onToggleFavorite }) => {
   const sentiment = getSentiment(r.sentiment);
   return (
     <div onClick={() => onRestaurantClick(r)} style={{
@@ -98,6 +107,9 @@ const RestaurantCard = ({ r, inCompare, onToggleCompare, onRestaurantClick }) =>
           <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
           {r.status || 'Open'}
         </div>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onToggleFavorite && onToggleFavorite(r); }} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'} style={{ position: 'absolute', top: '14px', right: '64px', width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: isFavorite ? '#fbbf24' : 'rgba(255,255,255,0.96)', color: isFavorite ? '#fff' : '#334155', fontSize: '18px', cursor: 'pointer', boxShadow: '0 10px 24px rgba(15,23,42,0.14)' }}>
+          {isFavorite ? '❤️' : '🤍'}
+        </button>
         <button type="button" onClick={(event) => { event.stopPropagation(); onToggleCompare(r.id); }} style={{ position: 'absolute', top: '14px', right: '14px', width: '40px', height: '40px', borderRadius: '50%', border: 'none', background: inCompare ? '#2563eb' : 'rgba(255,255,255,0.96)', color: inCompare ? '#fff' : '#334155', fontSize: '18px', cursor: 'pointer', boxShadow: '0 10px 24px rgba(15,23,42,0.14)' }}>
           {inCompare ? '✓' : '+'}
         </button>
@@ -147,6 +159,7 @@ const SearchDashboard = () => {
   const [recentSearches, setRecentSearches] = useState([]);
   const [trendingTags, setTrendingTags] = useState([]);
   const [pendingSearch, setPendingSearch] = useState(null);
+  const [favoriteIds, setFavoriteIds] = useState([]);
   const pendingSearchKeyRef = useRef('');
 
   const { restaurants: restaurantsData, isLoading, error, mapsReady, userLocation } =
@@ -157,11 +170,40 @@ const SearchDashboard = () => {
     setTrendingTags(getTrendingSearchTags(6));
   }, []);
 
+  const getRestaurantIdentifier = useCallback((restaurant) => {
+    if (!restaurant) return '';
+    return String(restaurant.restaurantId || restaurant.placeId || restaurant.id || '').trim();
+  }, []);
+
+  const loadFavoriteIds = useCallback(async () => {
+    const favorites = await getFavoritesList();
+    if (Array.isArray(favorites)) {
+      setFavoriteIds(favorites.map((id) => String(id)));
+    }
+  }, []);
+
+  const handleToggleFavorite = useCallback(async (restaurant) => {
+    const restaurantId = getRestaurantIdentifier(restaurant);
+    if (!restaurantId) return;
+    const result = await toggleFavoriteRestaurant(restaurantId, restaurant);
+    if (result && Array.isArray(result.favorites)) {
+      setFavoriteIds(result.favorites.map((id) => String(id)));
+    } else {
+      await loadFavoriteIds();
+    }
+  }, [getRestaurantIdentifier, loadFavoriteIds]);
+
   useEffect(() => {
     refreshSearchInsights();
     window.addEventListener('historyUpdated', refreshSearchInsights);
     return () => window.removeEventListener('historyUpdated', refreshSearchInsights);
   }, [refreshSearchInsights]);
+
+  useEffect(() => {
+    loadFavoriteIds();
+    window.addEventListener('historyUpdated', loadFavoriteIds);
+    return () => window.removeEventListener('historyUpdated', loadFavoriteIds);
+  }, [loadFavoriteIds]);
 
   const filteredRestaurants = useMemo(() => {
     let list = [...restaurantsData];
@@ -449,15 +491,20 @@ const SearchDashboard = () => {
                   {error || (searchQuery.trim() ? 'No restaurants match this search.' : 'No nearby restaurants found. Try a search term.')}
                 </div>
               ) : (
-                filteredRestaurants.map((r) => (
-                  <RestaurantCard
-                    key={r.id}
-                    r={r}
-                    inCompare={compareList.includes(r.id)}
-                    onToggleCompare={toggleCompare}
-                    onRestaurantClick={handleRestaurantClick}
-                  />
-                ))
+                filteredRestaurants.map((r) => {
+                  const restaurantId = String(r.id || r.placeId || r.restaurantId || '');
+                  return (
+                    <RestaurantCard
+                      key={restaurantId || r.id}
+                      r={r}
+                      inCompare={compareList.includes(r.id)}
+                      isFavorite={restaurantId ? favoriteIds.includes(restaurantId) : false}
+                      onToggleFavorite={handleToggleFavorite}
+                      onToggleCompare={toggleCompare}
+                      onRestaurantClick={handleRestaurantClick}
+                    />
+                  );
+                })
               )}
             </div>
           </div>

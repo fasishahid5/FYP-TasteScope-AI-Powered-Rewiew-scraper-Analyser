@@ -15,6 +15,7 @@ import {
   normalizeRole,
   setStoredAuth,
 } from '../lib/auth';
+import { fetchUnifiedHistory, getFavoritesList, removeFromFavorites } from '../lib/unifiedHistoryService';
 
 const countryCodeToFlag = (isoCode = '') => {
   if (!isoCode || typeof isoCode !== 'string') return '🏳️';
@@ -26,6 +27,47 @@ const countryCodeToFlag = (isoCode = '') => {
 };
 
 const MIN_BIO_LENGTH = 20;
+
+// Loading Skeleton Components
+const SkeletonBox = ({ width = '100%', height = '20px', borderRadius = '8px' }) => (
+  <div style={{
+    width, height, borderRadius, background: '#e2e8f0', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+  }} />
+);
+
+const SkeletonStats = () => (
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+    {[0, 1, 2, 3].map((i) => (
+      <div key={i} style={{
+        background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '20px', padding: '24px',
+        display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 4px 16px rgba(15,23,42,0.06)',
+      }}>
+        <div style={{ fontSize: '26px', opacity: 0.45 }}>⏳</div>
+        <div style={{ flex: 1 }}>
+          <SkeletonBox width="70px" height="14px" />
+          <SkeletonBox width="84px" height="24px" style={{ marginTop: '10px' }} />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+const SkeletonFavorites = () => (
+  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
+    {[0, 1, 2, 3].map((i) => (
+      <div key={i} style={{
+        background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <SkeletonBox width="100%" height="100px" borderRadius="0" />
+        <div style={{ padding: '12px' }}>
+          <SkeletonBox width="80%" height="14px" />
+          <SkeletonBox width="60%" height="12px" style={{ marginTop: '8px' }} />
+        </div>
+      </div>
+    ))}
+  </div>
+);
 
 const PACKAGE_COUNTRY_OPTIONS = Country.getAllCountries()
   .map((country) => ({
@@ -89,7 +131,6 @@ const ProfilePage = () => {
   const storedUser = getStoredUser() || {};
   const [user, setUser] = useState(storedUser);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState('favorites');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCoverOptionsOpen, setIsCoverOptionsOpen] = useState(false);
   const [profileForm, setProfileForm] = useState(() => createProfileForm(storedUser));
@@ -102,7 +143,13 @@ const ProfilePage = () => {
   const [avatarPreview, setAvatarPreview] = useState(user.avatarUrl || null);
   const [coverPreview, setCoverPreview] = useState(user.coverUrl || null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isMetricsLoading, setIsMetricsLoading] = useState(true);
+  const [profileStats, setProfileStats] = useState({ visits: 0, comparisons: 0, searches: 0 });
+  const [favoritesCount, setFavoritesCount] = useState(0);
+  const [favoriteRestaurants, setFavoriteRestaurants] = useState([]);
+  const [removingFavoriteId, setRemovingFavoriteId] = useState(null);
   const { restaurants: restaurantsData = [] } = useRestaurants();
+  const showProfileSkeleton = isLoading || isMetricsLoading;
   const photoInputRef = useRef(null);
 
   // Fetch user profile from backend on mount
@@ -122,19 +169,19 @@ const ProfilePage = () => {
           const data = await response.json();
           if (data.user) {
             const profile = data.user;
-          const countryMatch = PACKAGE_COUNTRY_OPTIONS.find(
-            (country) => country.value === profile.countryCode || country.label === profile.country
-          );
-          const nextProfileForm = createProfileForm({
-            ...profile,
-            countryCode: profile.countryCode || countryMatch?.value || '',
-          });
+            const countryMatch = PACKAGE_COUNTRY_OPTIONS.find(
+              (country) => country.value === profile.countryCode || country.label === profile.country
+            );
+            const nextProfileForm = createProfileForm({
+              ...profile,
+              countryCode: profile.countryCode || countryMatch?.value || '',
+            });
 
-          setUser(profile);
-          setAvatarPreview(profile.avatarUrl || null);
-          setCoverPreview(profile.coverUrl || null);
-          setProfileForm(nextProfileForm);
-          setStoredAuth({ token, user: profile });
+            setUser(profile);
+            setAvatarPreview(profile.avatarUrl || null);
+            setCoverPreview(profile.coverUrl || null);
+            setProfileForm(nextProfileForm);
+            setStoredAuth({ token, user: profile });
           }
         } else {
           console.warn('Profile fetch failed with status:', response.status);
@@ -148,6 +195,112 @@ const ProfilePage = () => {
     loadUserProfile();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadProfileMetrics = async () => {
+      setIsMetricsLoading(true);
+      try {
+        const historyData = await fetchUnifiedHistory();
+        const favorites = await getFavoritesList();
+
+        const allHistory = Array.isArray(historyData.history) ? historyData.history : [];
+        const favoriteItemsFromHistory = allHistory.filter((item) => item.type === 'favorite');
+        const favoritesOrder = Array.isArray(favorites) ? favorites.map((id) => String(id).trim()).filter(Boolean) : [];
+        const favoriteById = favoriteItemsFromHistory.reduce((acc, item) => {
+          const id = String(item.restaurantId || item._id || item.name || '').trim();
+          if (id) acc[id] = item;
+          return acc;
+        }, {});
+        const restaurantLookup = restaurantsData.reduce((acc, restaurant) => {
+          const id = String(restaurant.restaurantId || restaurant.placeId || restaurant.id || '').trim();
+          if (id) acc[id] = restaurant;
+          return acc;
+        }, {});
+
+        const favoriteItems = favoritesOrder.map((restaurantId, index) => {
+          const normalizedId = String(restaurantId);
+          if (favoriteById[normalizedId]) return favoriteById[normalizedId];
+
+          const matchedRestaurant = restaurantLookup[normalizedId];
+          if (matchedRestaurant) {
+            return {
+              _id: normalizedId,
+              type: 'favorite',
+              restaurantId: normalizedId,
+              name: matchedRestaurant.name || `Favorite ${index + 1}`,
+              details: {
+                ...matchedRestaurant,
+                name: matchedRestaurant.name || `Favorite ${index + 1}`,
+                location: matchedRestaurant.location || matchedRestaurant.address || 'Unknown location',
+                image: matchedRestaurant.image || matchedRestaurant.photo || matchedRestaurant.imageUrl || 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop&q=80',
+              },
+            };
+          }
+
+          return {
+            _id: normalizedId,
+            type: 'favorite',
+            restaurantId: normalizedId,
+            name: `Saved Favorite ${index + 1}`,
+            details: {
+              name: `Saved Favorite ${index + 1}`,
+              location: `Restaurant ID: ${normalizedId.slice(0, 20)}...`,
+              restaurantId: normalizedId,
+              image: 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop&q=80',
+            },
+          };
+        });
+
+        if (active) {
+          setProfileStats({
+            visits: historyData.stats?.visits || 0,
+            comparisons: historyData.stats?.comparisons || 0,
+            searches: historyData.stats?.searches || 0,
+          });
+          setFavoritesCount(favoritesOrder.length);
+          setFavoriteRestaurants(favoriteItems);
+        }
+      } catch (err) {
+        console.error('Error loading profile metrics:', err);
+        if (active) {
+          setProfileStats({ visits: 0, comparisons: 0, searches: 0 });
+          setFavoritesCount(0);
+          setFavoriteRestaurants([]);
+        }
+      } finally {
+        if (active) setIsMetricsLoading(false);
+      }
+    };
+
+    const handleHistoryUpdated = () => loadProfileMetrics();
+    loadProfileMetrics();
+    window.addEventListener('historyUpdated', handleHistoryUpdated);
+
+    return () => {
+      active = false;
+      window.removeEventListener('historyUpdated', handleHistoryUpdated);
+    };
+  }, [restaurantsData]);
+
+  const handleRemoveFavorite = async (restaurantId) => {
+    const normalizedId = String(restaurantId || '').trim();
+    if (!normalizedId || removingFavoriteId) return;
+    setRemovingFavoriteId(normalizedId);
+    try {
+      const result = await removeFromFavorites(normalizedId);
+      if (result) {
+        setFavoriteRestaurants((current) =>
+          current.filter((item) => String(item.restaurantId || item._id) !== normalizedId)
+        );
+        setFavoritesCount((count) => Math.max(0, count - 1));
+      }
+    } catch (error) {
+      console.error('Failed to remove favorite:', error);
+    } finally {
+      setRemovingFavoriteId(null);
+    }
+  };
 
   const loadCityOptions = useCallback(async (countryCode, inputValue = '') => {
     if (!countryCode) {
@@ -227,9 +380,6 @@ const ProfilePage = () => {
   const profilePhone = user.phone || 'No phone set';
   const profileLocation = [user.city, user.country].filter(Boolean).join(', ') || 'Add your location';
   const joinedLabel = formatJoinDate(user.createdAt);
-
-  const favorites = restaurantsData.slice(0, 4);
-  const reviews = [{ id: 1, name: 'Review 1' }];
 
   const handleNav = (key) => {
     if (key === 'home') navigate('/dashboard');
@@ -777,18 +927,26 @@ const ProfilePage = () => {
           </div>
 
           {/* STATS CARDS */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '16px',
-            marginBottom: '28px',
-          }}>
-            {[
-              { icon: '📍', label: 'Restaurant Visits', value: '47' },
-              { icon: '⭐', label: 'Reviews Written', value: '23' },
-              { icon: '❤️', label: 'Favorites Saved', value: '12' },
-              { icon: '↗️', label: 'Comparisons Made', value: '8' },
-            ].map((stat, idx) => (
+          {showProfileSkeleton ? (
+            <>
+              <SkeletonStats />
+              <div style={{ marginBottom: '24px', color: '#64748b', fontSize: '13px', lineHeight: '1.6' }}>
+                Preparing your profile summary and favorites overview. Please wait while we gather the latest personalized insights.
+              </div>
+            </>
+          ) : (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '16px',
+              marginBottom: '28px',
+            }}>
+              {[
+                { icon: '📍', label: 'Restaurant Visits', value: profileStats.visits },
+                { icon: '⚖️', label: 'Comparisons Made', value: profileStats.comparisons },
+                { icon: '🔍', label: 'Searched', value: profileStats.searches },
+                { icon: '❤️', label: 'Favorites Saved', value: favoritesCount },
+              ].map((stat, idx) => (
               <div
                 key={idx}
                 style={{
@@ -810,113 +968,257 @@ const ProfilePage = () => {
               </div>
             ))}
           </div>
+        )}
 
           {/* MAIN GRID: Favorites + Quick Menu */}
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
-            {/* LEFT: FAVORITES */}
+            {/* LEFT: Favorites list */}
             <div>
-              {/* TABS */}
               <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
                 background: '#ffffff',
                 border: '1px solid #e2e8f0',
-                borderRadius: '16px',
+                borderRadius: '20px',
+                padding: '22px 24px',
                 marginBottom: '20px',
-                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
               }}>
-                {[
-                  { id: 'favorites', label: 'Favorites (4)' },
-                  { id: 'reviews', label: 'Reviews (3)' },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    style={{
-                      padding: '14px 16px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: activeTab === tab.id ? '#0f172a' : '#64748b',
-                      background: activeTab === tab.id ? '#ffffff' : 'transparent',
-                      border: activeTab === tab.id ? 'none' : '1px solid #e2e8f0',
-                      borderRight: '1px solid #e2e8f0',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#2563eb', letterSpacing: '0.12em', marginBottom: '6px' }}>YOUR TOP PICKS</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: '#0f172a' }}>Favorite Restaurants</div>
+                </div>
+                <div style={{ fontSize: '14px', fontWeight: '700', color: '#475569' }}>{favoritesCount} saved</div>
               </div>
 
-              {/* CARDS GRID */}
-              {activeTab === 'favorites' && (
+              {showProfileSkeleton ? (
+                <SkeletonFavorites />
+              ) : (
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                  gap: '16px',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                  gap: '20px',
                 }}>
-                  {favorites.map((item) => (
-                    <div
-                      key={item.id}
+                  {favoriteRestaurants.length === 0 ? (
+                    <div style={{
+                    gridColumn: '1 / -1',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '20px',
+                    padding: '40px 32px',
+                    textAlign: 'center',
+                    color: '#64748b',
+                  }}>
+                    <div style={{ fontSize: '36px', marginBottom: '12px' }}>❤️</div>
+                    <div style={{ fontSize: '18px', fontWeight: '700', color: '#0f172a', marginBottom: '8px' }}>No saved favorites yet</div>
+                    <div style={{ fontSize: '13px', maxWidth: '320px', margin: '0 auto' }}>
+                      Tap the heart on any restaurant while browsing to save it here.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/search')}
                       style={{
+                        marginTop: '20px',
+                        padding: '10px 18px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        color: '#ffffff',
+                        background: '#2563eb',
+                        border: 'none',
+                        borderRadius: '10px',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
+                      }}
+                    >
+                      Explore Restaurants
+                    </button>
+                  </div>
+                ) : favoriteRestaurants.map((item, index) => {
+                  const details = item.details || {};
+                  const restaurantId = String(item.restaurantId || item._id || '').trim();
+                  const fallbackImage = 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=800&h=600&fit=crop&q=80';
+                  const imageUrl = details.image || details.imageUrl || details.photo || item.image || fallbackImage;
+                  const name = details.name || item.name || `Saved Favorite ${index + 1}`;
+                  const location = details.location || details.address || item.location || 'Location unavailable';
+                  const rating = details.rating ?? details.avgRating ?? null;
+                  const cuisine = details.cuisine || item.cuisine || '';
+                  const reviewCount = details.reviews ?? details.reviewCount ?? null;
+                  const isRemoving = removingFavoriteId === restaurantId;
+
+                  return (
+                    <div
+                      key={restaurantId || `${name}-${index}`}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
                         background: '#ffffff',
                         border: '1px solid #e2e8f0',
-                        borderRadius: '20px',
+                        borderRadius: '16px',
                         overflow: 'hidden',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.01)',
-                        transition: 'all 0.3s',
-                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(15,23,42,0.05)',
+                        transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-4px)';
-                        e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.08)';
+                        e.currentTarget.style.transform = 'translateY(-3px)';
+                        e.currentTarget.style.boxShadow = '0 12px 28px rgba(15,23,42,0.1)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.01)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(15,23,42,0.05)';
                       }}
                     >
-                      <div style={{ position: 'relative', height: '140px', background: '#e5edf5', overflow: 'hidden' }}>
+                      <div style={{
+                        position: 'relative',
+                        height: '160px',
+                        overflow: 'hidden',
+                        background: '#f1f5f9',
+                        flexShrink: 0,
+                      }}>
                         <img
-                          src={item.image}
-                          alt={item.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          src={imageUrl}
+                          alt={name}
+                          onError={(event) => {
+                            if (event.currentTarget.src !== fallbackImage) {
+                              event.currentTarget.src = fallbackImage;
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            display: 'block',
+                          }}
                         />
+
+                        <div style={{
+                          position: 'absolute',
+                          top: '12px',
+                          left: '12px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          background: '#fef3c7',
+                          color: '#ca8a04',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          padding: '4px 10px',
+                          borderRadius: '20px',
+                        }}>
+                          <span style={{ width: '5px', height: '5px', backgroundColor: '#ca8a04', borderRadius: '50%', display: 'inline-block' }} />
+                          Favorite
+                        </div>
+
                         <button
                           type="button"
+                          onClick={() => handleRemoveFavorite(restaurantId)}
+                          disabled={Boolean(removingFavoriteId)}
+                          aria-label={`Remove ${name} from favorites`}
+                          title="Remove from favorites"
                           style={{
                             position: 'absolute',
-                            top: '10px',
-                            right: '10px',
-                            width: '32px',
-                            height: '32px',
+                            top: '12px',
+                            right: '12px',
+                            width: '36px',
+                            height: '36px',
                             borderRadius: '50%',
-                            background: '#ffffff',
+                            background: isRemoving ? '#fde68a' : '#fbbf24',
                             border: 'none',
-                            cursor: 'pointer',
-                            fontSize: '18px',
+                            cursor: removingFavoriteId ? 'not-allowed' : 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+                            fontSize: '18px',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.14)',
+                            opacity: removingFavoriteId && !isRemoving ? 0.55 : 1,
+                            transition: 'transform 0.15s ease, background 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!removingFavoriteId) e.currentTarget.style.transform = 'scale(1.08)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
                           }}
                         >
-                          ❤️
+                          {isRemoving ? '…' : '❤️'}
                         </button>
                       </div>
-                      <div style={{ padding: '14px 16px' }}>
-                        <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#0f172a', margin: '0 0 4px' }}>{item.name}</h3>
-                        <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>{item.cuisine} • {item.priceRange}</p>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', fontSize: '12px', color: '#64748b' }}>
-                          <span>📍 {item.location.substring(0, 15)}...</span>
-                          <span>👁️ {Math.max(5, Math.round(item.reviews / 300))} visits</span>
-                        </div>
+
+                      <div style={{ padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                        <h3 style={{
+                          margin: 0,
+                          fontSize: '15px',
+                          fontWeight: '700',
+                          color: '#0f172a',
+                          lineHeight: 1.35,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {name}
+                        </h3>
+
+                        <p style={{
+                          margin: 0,
+                          fontSize: '12px',
+                          color: '#64748b',
+                          lineHeight: 1.45,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          📍 {location}
+                        </p>
+
+                        {(rating != null || cuisine || reviewCount != null) && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                            {rating != null && (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#0f172a',
+                                background: '#fef9c3',
+                                borderRadius: '999px',
+                                padding: '4px 10px',
+                              }}>
+                                ★ {Number(rating).toFixed(1)}
+                              </span>
+                            )}
+                            {cuisine && (
+                              <span style={{
+                                fontSize: '11px',
+                                color: '#475569',
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '999px',
+                                padding: '4px 10px',
+                              }}>
+                                {cuisine}
+                              </span>
+                            )}
+                            {reviewCount != null && (
+                              <span style={{
+                                fontSize: '11px',
+                                color: '#64748b',
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '999px',
+                                padding: '4px 10px',
+                              }}>
+                                {reviewCount} reviews
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
+            )}
             </div>
 
             {/* RIGHT: QUICK MENU + BADGES */}

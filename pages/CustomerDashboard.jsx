@@ -1,11 +1,12 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import GoogleMapView from '../components/GoogleMapView';
 import AutocompleteSearch from '../components/AutocompleteSearch';
 import { useRestaurants } from '../lib/useRestaurants';
-import { getStoredUser } from '../lib/auth';
-import { logVisitToDatabase, toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
+import { API_BASE_URL, getStoredUser } from '../lib/auth';
+import { getFavoritesList, logVisitToDatabase, toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
+import { generateFallbackReviewData, reportSentimentFallback } from '../lib/reviewHelpers';
 
 // Filter icon for the filter button.
 const FilterIcon = () => (
@@ -15,6 +16,32 @@ const FilterIcon = () => (
     <line x1="8" y1="12" x2="16" y2="12" />
     <line x1="11" y1="18" x2="13" y2="18" />
   </svg>
+);
+
+const AILoadingPanel = () => (
+  <div style={{
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '40px 30px',
+    background: 'linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%)',
+    borderRadius: '18px',
+    border: '1.5px solid #bfdbfe',
+    marginBottom: '20px',
+  }}>
+    <style>{`
+      @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
+      .ai-loading-icon { animation: float 2s ease-in-out infinite; font-size: 50px; margin-bottom: 18px; }
+    `}</style>
+    <div className="ai-loading-icon">🤖</div>
+    <p style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', margin: '0 0 10px', textAlign: 'center' }}>
+      Analyzing hundreds of real reviews for the best local dining matches
+    </p>
+    <p style={{ fontSize: '13px', color: '#334155', margin: 0, textAlign: 'center', lineHeight: '1.6', maxWidth: '300px' }}>
+      Our AI engine is evaluating sentiment, highlights, and trust signals to deliver a curated dining recommendation in seconds.
+    </p>
+  </div>
 );
 
 // ─── SENTIMENT HELPERS ───────────────────────────────────────────────────────
@@ -39,7 +66,7 @@ const getGrade = (score) => {
 };
 
 // ─── RESTAURANT CARD ─────────────────────────────────────────────────────────
-const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare, onCardClick }) => {
+const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare, onCardClick, isFavorite, onToggleFavorite }) => {
   const s = getSentiment(r.sentiment);
   return (
     <div
@@ -89,6 +116,24 @@ const RestaurantCard = ({ r, hovered, onHover, inCompare, onToggleCompare, onCar
           {r.sentiment}% {s.label}
         </div>
 
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onToggleFavorite && onToggleFavorite(r); }}
+          title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          style={{
+            position: 'absolute', top: '10px', right: '52px',
+            width: '34px', height: '34px', borderRadius: '50%',
+            background: isFavorite ? '#fbbf24' : 'rgba(255,255,255,0.93)',
+            color: isFavorite ? '#fff' : '#374151',
+            border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '18px', lineHeight: 1,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.14)',
+            transition: 'background 0.15s ease',
+          }}
+        >
+          {isFavorite ? '❤️' : '🤍'}
+        </button>
         <button
           title={inCompare ? 'Remove from compare' : 'Add to compare'}
           onClick={(e) => { e.stopPropagation(); onToggleCompare(r.id); }}
@@ -172,6 +217,7 @@ const CustomerDashboard = () => {
   const [compareList, setCompareList] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ts_compareList') || '[]'); } catch { return []; }
   });
+  const [favoriteIds, setFavoriteIds] = useState([]);
   const [mapInstance, setMapInstance] = useState(null);
   
   // Geolocation and nearby filtering
@@ -189,9 +235,13 @@ const CustomerDashboard = () => {
 
   // Real sentiment from backend VADER analysis
   const [sentimentData, setSentimentData] = useState(null); // { positive, neutral, negative, sentiment, insight, reviewCount, loading }
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiProgress, setAiProgress] = useState(0);
 
   // Ref for scrolling the list panel to top when a card is opened
   const listPanelRef = useRef(null);
+  const aiProgressIntervalRef = useRef(null);
+  const aiProgressTimeoutRef = useRef(null);
 
   // Fallback images for restaurants that have no Google photo
   const FALLBACK_IMAGES = [
@@ -212,45 +262,192 @@ const CustomerDashboard = () => {
     return 58 + Math.abs(h % 38); // 58–95
   };
 
+  const getRestaurantIdentifier = useCallback((restaurant) => {
+    if (!restaurant) return '';
+    return String(restaurant.restaurantId || restaurant.placeId || restaurant.id || '').trim();
+  }, []);
+
+  const loadFavoriteIds = useCallback(async () => {
+    const favorites = await getFavoritesList();
+    if (Array.isArray(favorites)) {
+      setFavoriteIds(favorites.map((id) => String(id)));
+    }
+  }, []);
+
+  const handleToggleFavorite = useCallback(async (restaurant) => {
+    const restaurantId = getRestaurantIdentifier(restaurant);
+    if (!restaurantId) return;
+    const result = await toggleFavoriteRestaurant(restaurantId, restaurant);
+    if (result && Array.isArray(result.favorites)) {
+      setFavoriteIds(result.favorites.map((id) => String(id)));
+    } else {
+      await loadFavoriteIds();
+    }
+  }, [getRestaurantIdentifier, loadFavoriteIds]);
+
   // Builds a mock sentiment object deterministically (fallback when backend is unavailable)
   const buildMockSentimentData = (placeId) => {
     const pos = mockSentiment(String(placeId));
     const neg = Math.max(5, Math.round((100 - pos) * 0.35));
     const neu = 100 - pos - neg;
-    let insight = '';
-    if (pos >= 80) insight = 'Customers consistently rate this place highly. The food and service receive strong praise.';
-    else if (pos >= 65) insight = 'Most customers enjoy this restaurant. A few concerns about service speed are noted.';
-    else if (pos >= 50) insight = 'Opinions are mixed. Many enjoy the food but some customers mention service issues.';
-    else insight = 'Balanced reception — the restaurant has both fans and critics worth considering.';
-    return { positive: pos, neutral: neu, negative: neg, sentiment: pos, insight, reviewCount: 0, loading: false, source: 'mock' };
+    const insight = pos >= 80
+      ? 'Customers consistently rate this place highly. The food and service receive strong praise.'
+      : pos >= 65
+        ? 'Most customers enjoy this restaurant. A few concerns about service speed are noted.'
+        : pos >= 50
+          ? 'Opinions are mixed. Many enjoy the food but some customers mention service issues.'
+          : 'Balanced reception — the restaurant has both fans and critics worth considering.';
+
+    return {
+      positive: pos,
+      neutral: neu,
+      negative: neg,
+      sentiment: pos,
+      insight,
+      reviewCount: 0,
+      naturalReview: null,
+      aiOverview: null,
+      aiVerdict: null,
+      naturalReviewSections: null,
+      source: 'mock',
+      model: 'fallback',
+      isFallback: true,
+      loading: false,
+    };
   };
 
   // Fetch real Google reviews for the selected place and run VADER analysis on backend
   // Backend uses Puppeteer to scrape Google Maps (up to 25 reviews), falls back to Places API reviews, then mock
   useEffect(() => {
-    if (!selectedPlaceDetails) { setSentimentData(null); return; }
+    const clearAiProgress = () => {
+      if (aiProgressIntervalRef.current) {
+        clearInterval(aiProgressIntervalRef.current);
+        aiProgressIntervalRef.current = null;
+      }
+      if (aiProgressTimeoutRef.current) {
+        clearTimeout(aiProgressTimeoutRef.current);
+        aiProgressTimeoutRef.current = null;
+      }
+    };
 
-    setSentimentData({ loading: true });
+    if (!selectedPlaceDetails) {
+      clearAiProgress();
+      setSentimentData(null);
+      setIsAiLoading(false);
+      setAiProgress(0);
+      return;
+    }
 
-    const placeId = selectedPlaceDetails.placeId;
-    const placeName = selectedPlaceDetails.name || '';
-    const address = selectedPlaceDetails.address || selectedPlaceDetails.location || '';
+    const startProgress = () => {
+      setAiProgress(5);
+      if (aiProgressIntervalRef.current) {
+        clearInterval(aiProgressIntervalRef.current);
+      }
+      aiProgressIntervalRef.current = setInterval(() => {
+        setAiProgress((prev) => {
+          const next = prev + Math.floor(Math.random() * 10) + 4;
+          return Math.min(95, next);
+        });
+      }, 220);
+    };
 
-    // Collect any reviews already attached (Places API gives up to 5 as fallback for backend)
-    const existingReviews = Array.isArray(selectedPlaceDetails.reviews)
-      ? selectedPlaceDetails.reviews.map(r => (typeof r === 'string' ? r : r?.text || '')).filter(Boolean)
-      : [];
+    const fetchSentiment = async () => {
+      setIsAiLoading(true);
+      startProgress();
+      setSentimentData({ loading: true });
 
-    fetch('http://localhost:5000/api/sentiment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ placeId, placeName, address, reviews: existingReviews }),
-    })
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(data => setSentimentData({ ...data, loading: false }))
-      .catch(() => setSentimentData(buildMockSentimentData(placeId || placeName)));
+      const placeId = selectedPlaceDetails.placeId;
+      const placeName = selectedPlaceDetails.name || '';
+      const address = selectedPlaceDetails.address || selectedPlaceDetails.location || '';
+
+      const existingReviews = Array.isArray(selectedPlaceDetails.reviews)
+        ? selectedPlaceDetails.reviews.map((r) => (typeof r === 'string' ? r : r?.text || '')).filter(Boolean)
+        : [];
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/sentiment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ placeId, placeName, address, reviews: existingReviews }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => null);
+          throw new Error(text || response.statusText || `Request failed (${response.status})`);
+        }
+
+        const data = await response.json();
+        const normalizedData = {
+          ...data,
+          loading: false,
+          isFallback: Boolean(data.isFallback) || !Array.isArray(data.naturalReviewSections) || data.naturalReviewSections.length === 0,
+          source: data.source || 'google_places_aggregator',
+          model: data.model || (data.isFallback ? 'google_places_aggregator' : 'roberta'),
+        };
+        setSentimentData(normalizedData);
+      } catch (err) {
+        console.error('AI sentiment fetch failed:', err);
+        const fallback = generateFallbackReviewData(
+          {},
+          selectedPlaceDetails,
+          'google_places_aggregator'
+        );
+        setSentimentData(fallback);
+        reportSentimentFallback({
+          errorType: 'sentiment_fetch_failure',
+          message: err?.message || 'Sentiment request failed',
+          placeId,
+          placeName,
+          source: 'google_places_aggregator',
+          model: 'google_places_aggregator',
+          details: { reviewCount: existingReviews.length },
+        });
+      } finally {
+        clearAiProgress();
+        setAiProgress(100);
+        aiProgressTimeoutRef.current = setTimeout(() => {
+          setIsAiLoading(false);
+          aiProgressTimeoutRef.current = null;
+        }, 260);
+      }
+    };
+
+    fetchSentiment();
+
+    return () => {
+      clearAiProgress();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlaceDetails]);
+
+  const visitedSentimentLogRef = React.useRef(null);
+
+  const buildPersistedRestaurantDetails = (restaurant = {}, sentiment = null) => {
+    if (!restaurant || typeof restaurant !== 'object') return restaurant;
+    return {
+      ...restaurant,
+      sentiment: sentiment?.sentiment ?? restaurant.sentiment,
+      reviews: sentiment?.reviewCount ?? restaurant.reviews,
+      naturalReview: sentiment?.naturalReview ?? restaurant.naturalReview,
+      aiOverview: sentiment?.aiOverview ?? restaurant.aiOverview,
+      aiVerdict: sentiment?.aiVerdict ?? restaurant.aiVerdict,
+      insight: sentiment?.insight ?? restaurant.insight,
+      naturalReviewSections: sentiment?.naturalReviewSections ?? restaurant.naturalReviewSections,
+      source: sentiment?.source ?? restaurant.source,
+      model: sentiment?.model ?? restaurant.model,
+      isFallback: sentiment?.isFallback ?? restaurant.isFallback,
+    };
+  };
+
+  useEffect(() => {
+    if (!selectedPlaceDetails || !sentimentData || sentimentData.loading) return;
+    const placeId = String(selectedPlaceDetails.placeId || selectedPlaceDetails.id || selectedPlaceDetails.name || 'unknown');
+    if (visitedSentimentLogRef.current === placeId) return;
+
+    visitedSentimentLogRef.current = placeId;
+    const enrichedDetails = buildPersistedRestaurantDetails(selectedPlaceDetails, sentimentData);
+    logVisitToDatabase(placeId, enrichedDetails);
+  }, [selectedPlaceDetails, sentimentData]);
 
   // Compute distance (km) between two lat/lng points using Haversine formula
   const distanceKm = (lat1, lon1, lat2, lon2) => {
@@ -418,6 +615,9 @@ const CustomerDashboard = () => {
     if (id === 'settings') navigate('/settings');
   };
 
+  const selectedDetailRestaurantId = selectedPlaceDetails ? String(selectedPlaceDetails.placeId || selectedPlaceDetails.id || '') : '';
+  const selectedIsFavorite = selectedDetailRestaurantId ? favoriteIds.includes(selectedDetailRestaurantId) : false;
+
   // Auto-fetch user location on dashboard mount
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -438,6 +638,13 @@ const CustomerDashboard = () => {
       { enableHighAccuracy: true, timeout: 10000 }
     );
   }, []);
+
+  // Load favorites on mount and listen for updates from other pages
+  useEffect(() => {
+    loadFavoriteIds();
+    window.addEventListener('historyUpdated', loadFavoriteIds);
+    return () => window.removeEventListener('historyUpdated', loadFavoriteIds);
+  }, [loadFavoriteIds]);
 
   return (
     <div style={{
@@ -532,7 +739,6 @@ const CustomerDashboard = () => {
                 });
                 // Store full place details for card display
                 setSelectedPlaceDetails(placeData);
-                logVisitToDatabase(placeData.placeId || placeData.id || placeData.name, placeData);
               }} 
             />
 
@@ -894,17 +1100,61 @@ const CustomerDashboard = () => {
                       <p style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                         🤖 AI Sentiment Analysis
                       </p>
-                      {sentimentData && sentimentData.loading && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#2563eb', fontSize: '12px', fontWeight: '600' }}>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
-                          Scraping Google Maps reviews…
+                      {isAiLoading ? (
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '12px',
+                          padding: '18px 12px',
+                          borderRadius: '14px',
+                          background: '#eff6ff',
+                          color: '#1e3a8a',
+                          animation: 'fadeIn 0.3s ease-out',
+                        }}>
+                          <div style={{ fontSize: '34px', lineHeight: 1 }}>🤖</div>
+                          <div style={{ fontSize: '15px', fontWeight: 700, textAlign: 'center' }}>
+                            Refining your dining insights with AI-powered review intelligence...
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#1d4ed8', textAlign: 'center', lineHeight: '1.5' }}>
+                            Analyzing sentiment, ratings, and review trends for a premium recommendation.
+                          </div>
+                          <div style={{ width: '100%', height: '8px', borderRadius: '999px', overflow: 'hidden', background: '#dbeafe' }}>
+                            <div style={{
+                              width: `${aiProgress}%`,
+                              minWidth: '10%',
+                              height: '100%',
+                              background: 'linear-gradient(90deg, rgba(37,99,235,0.95), rgba(59,130,246,0.95), rgba(37,99,235,0.95))',
+                              transition: 'width 0.2s ease-out',
+                            }} />
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#2563eb', textAlign: 'center', lineHeight: '1.4', marginTop: '6px' }}>
+                            {aiProgress < 100
+                              ? `Processing reviews — ${aiProgress}% complete`
+                              : 'Finishing analysis and applying AI insights...'}
+                          </div>
                         </div>
-                      )}
-                      {sentimentData && !sentimentData.loading && (() => {
+                      ) : sentimentData ? (
+                        (() => {
                         const aiScore = calcAIScore(sentimentData.positive, sentimentData.neutral, sentimentData.negative);
                         const g = getGrade(aiScore);
                         return (
                           <>
+                            {sentimentData.isFallback && (
+                              <div style={{
+                                marginBottom: '10px',
+                                padding: '10px 12px',
+                                borderRadius: '12px',
+                                background: '#fffbeb',
+                                border: '1px solid #facc15',
+                                color: '#92400e',
+                                fontSize: '12px',
+                                fontWeight: 700,
+                              }}>
+                                ⚠️ Static Data Snapshot (AI Offline) — using aggregated Google Places rating data only.
+                              </div>
+                            )}
                             {/* Score row */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px' }}>
                               {/* Circular score */}
@@ -957,11 +1207,13 @@ const CustomerDashboard = () => {
                                 : sentimentData.source?.includes('places_api') ? '📌 Places API'
                                 : '🔮 Fallback'}
                               {' · '}
-                              {sentimentData.model === 'vader' ? 'VADER NLP' : 'RoBERTa AI'}
+                              {sentimentData.model === 'vader' ? 'VADER NLP'
+                                : sentimentData.model === 'google_places_aggregator' ? 'Google Places Aggregator'
+                                : 'RoBERTa AI'}
                             </p>
                           </>
                         );
-                      })()}
+                      })()) : null}
                     </div>
 
                     {/* ─ AI Natural Review ─ */}
@@ -974,9 +1226,14 @@ const CustomerDashboard = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                           <span style={{ fontSize: '13px' }}>🤖</span>
                           <span style={{ fontSize: '11px', fontWeight: '700', color: '#7c3aed' }}>AI Review Summary</span>
-                          {sentimentData.model && sentimentData.model !== 'vader' && (
+                          {sentimentData.model && sentimentData.model === 'roberta' && (
                             <span style={{ fontSize: '9px', background: '#ede9fe', color: '#6d28d9', padding: '1px 6px', borderRadius: '6px', fontWeight: '600', marginLeft: 'auto' }}>
                               RoBERTa + Extractive AI
+                            </span>
+                          )}
+                        {sentimentData.model && sentimentData.model === 'google_places_aggregator' && (
+                            <span style={{ fontSize: '9px', background: '#fffbeb', color: '#92400e', padding: '1px 6px', borderRadius: '6px', fontWeight: '600', marginLeft: 'auto' }}>
+                              Google Places Aggregator
                             </span>
                           )}
                         </div>
@@ -1098,22 +1355,21 @@ const CustomerDashboard = () => {
                       <button
                         style={{
                           padding: '8px 10px', fontSize: '11px', fontWeight: '700',
-                          borderRadius: '8px', border: '1.5px solid #ec4899',
-                          background: '#fff', color: '#ec4899',
+                          borderRadius: '8px', border: '1.5px solid',
+                          borderColor: selectedIsFavorite ? '#ec4899' : '#ec4899',
+                          background: selectedIsFavorite ? '#ec4899' : '#fff',
+                          color: selectedIsFavorite ? '#fff' : '#ec4899',
                           cursor: 'pointer', transition: 'all 0.2s ease',
                         }}
                         onClick={() => {
                           if (selectedPlaceDetails?.placeId || selectedPlaceDetails?.id) {
-                            toggleFavoriteRestaurant(
-                              String(selectedPlaceDetails.placeId || selectedPlaceDetails.id),
-                              selectedPlaceDetails
-                            );
+                            handleToggleFavorite(selectedPlaceDetails);
                           }
                         }}
-                        onMouseEnter={(e) => e.target.style.background = '#fce7f3'}
-                        onMouseLeave={(e) => e.target.style.background = '#fff'}
+                        onMouseEnter={(e) => e.target.style.background = selectedIsFavorite ? '#db2777' : '#fce7f3'}
+                        onMouseLeave={(e) => e.target.style.background = selectedIsFavorite ? '#ec4899' : '#fff'}
                       >
-                        ❤️ Favorite
+                        {selectedIsFavorite ? '❤️ Favorited' : '🤍 Favorite'}
                       </button>
                     </div>
                   </div>
@@ -1128,17 +1384,22 @@ const CustomerDashboard = () => {
                   {restaurantsStatusMessage || (locationLoading ? 'Locating restaurants near you...' : userLocation || searchQuery ? 'No restaurants match your search.' : 'Use the search box or allow location access to see nearby restaurants.')}
                 </div>
               ) : (
-                filteredRestaurants.map((r) => (
-                  <RestaurantCard
-                    key={r.id}
-                    r={r}
-                    hovered={hoveredPin === r.id}
-                    onHover={setHoveredPin}
-                    inCompare={compareList.includes(r.id)}
-                    onToggleCompare={toggleCompare}
-                    onCardClick={handleCardClick}
-                  />
-                ))
+                filteredRestaurants.map((r) => {
+                  const restaurantId = String(r.id || r.placeId || r.restaurantId || '');
+                  return (
+                    <RestaurantCard
+                      key={r.id}
+                      r={r}
+                      hovered={hoveredPin === r.id}
+                      onHover={setHoveredPin}
+                      inCompare={compareList.includes(r.id)}
+                      onToggleCompare={toggleCompare}
+                      onCardClick={handleCardClick}
+                      isFavorite={restaurantId ? favoriteIds.includes(restaurantId) : false}
+                      onToggleFavorite={handleToggleFavorite}
+                    />
+                  );
+                })
               )}
             </div>
           </div>

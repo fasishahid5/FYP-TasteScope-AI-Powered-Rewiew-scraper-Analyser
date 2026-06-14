@@ -13,6 +13,14 @@ const HISTORY_DETAILS_FIELDS = [
   'lat',
   'lng',
   'placeId',
+  'naturalReview',
+  'aiOverview',
+  'aiVerdict',
+  'insight',
+  'isFallback',
+  'naturalReviewSections',
+  'source',
+  'model',
 ];
 
 const sanitizeRestaurantDetails = (restaurant = {}) => {

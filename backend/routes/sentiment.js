@@ -62,6 +62,9 @@ router.post('/', async (req, res) => {
     // Generate a structured review ({ text, sections })
     let naturalReview = null;
     let naturalReviewSections = null;
+    let aiOverview = null;
+    let aiVerdict = null;
+
     try {
       const reviewResult = await generateNaturalReview(
         placeName || 'this restaurant',
@@ -72,8 +75,12 @@ router.post('/', async (req, res) => {
       if (reviewResult && typeof reviewResult === 'object' && reviewResult.sections) {
         naturalReview = reviewResult.text;
         naturalReviewSections = reviewResult.sections;
+        aiOverview = reviewResult.sections.find((section) => section.type === 'overview')?.text || reviewResult.text;
+        aiVerdict = reviewResult.sections.find((section) => section.type === 'verdict')?.text || reviewResult.text;
       } else {
         naturalReview = reviewResult; // plain string fallback
+        aiOverview = String(reviewResult);
+        aiVerdict = String(reviewResult);
       }
     } catch (genErr) {
       console.error('[Sentiment] Natural review generation failed:', genErr.message);
@@ -82,6 +89,7 @@ router.post('/', async (req, res) => {
     // Reflect which engine was actually used (AI vs VADER fallback)
     const engineSuffix = result.modelUsed === 'vader' ? 'vader' : 'roberta';
     const finalSource = dataSource.replace('+ai', `+${engineSuffix}`);
+    const isFallback = result.modelUsed === 'vader' || !naturalReviewSections;
 
     return res.json({
       positive: result.positive,
@@ -91,14 +99,41 @@ router.post('/', async (req, res) => {
       reviewCount: reviewTexts.length,
       insight: generateInsight(result),
       naturalReview,
+      aiOverview,
+      aiVerdict,
       naturalReviewSections,
       source: finalSource,
       model: result.modelUsed,
+      isFallback,
     });
   } catch (err) {
     console.error('Sentiment analysis error:', err.message);
     return res.status(500).json({ msg: 'Sentiment analysis failed' });
   }
+});
+
+router.post('/error-report', async (req, res) => {
+  const {
+    errorType,
+    message,
+    placeId,
+    placeName,
+    source,
+    model,
+    details,
+  } = req.body || {};
+
+  console.warn('[Sentiment] Fallback telemetry report:', {
+    errorType,
+    message,
+    placeId,
+    placeName,
+    source,
+    model,
+    details,
+  });
+
+  return res.status(204).send();
 });
 
 module.exports = router;
