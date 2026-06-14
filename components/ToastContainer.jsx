@@ -1,0 +1,43 @@
+import React from 'react';
+import { useAppContext } from '../src/context/AppContext';
+
+const emojiForType = (type) => {
+  if (!type) return '🔔';
+  if (String(type) === 'ai_complete') return '✨';
+  if (String(type) === 'milestone') return '🏅';
+  return '🔔';
+};
+
+const ToastContainer = () => {
+  const { toasts, setToasts } = useAppContext();
+
+  if (!Array.isArray(toasts)) return null;
+
+  return (
+    <div className="fixed top-5 right-5 z-[9999] flex flex-col gap-3 pointer-events-none max-w-sm w-full">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="pointer-events-auto bg-white border border-gray-100 shadow-xl rounded-xl p-4 flex items-start gap-3 transition-all duration-300 transform animate-slideIn"
+        >
+          <div className="text-2xl leading-none">{emojiForType(t.type)}</div>
+          <div className="flex-1">
+            <div className="font-semibold text-gray-900">{t.title}</div>
+            <div className="text-sm text-gray-600 mt-1">{t.message}</div>
+          </div>
+          <div className="flex items-start">
+            <button
+              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+              className="ml-2 text-gray-400 hover:text-gray-600"
+              aria-label="close"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default ToastContainer;

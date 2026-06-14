@@ -1,7 +1,9 @@
 const express = require('express');
+const protectRoute = require('../middleware/auth');
 const { analyzeReviews } = require('../services/sentimentService');
 const { generateNaturalReview } = require('../services/aiSentimentService');
 const { scrapeGoogleMapsReviews } = require('../services/googleReviewsScraper');
+const { createSystemNotification } = require('../routes/notification');
 
 const router = express.Router();
 
@@ -20,46 +22,51 @@ const generateInsight = ({ positive, neutral, negative }) => {
 // - Scrapes Google Maps for real reviews (up to 100), then runs RoBERTa AI
 // - Falls back to client-provided reviews (Places API, max 5) if scraping fails
 // - Falls back to VADER if RoBERTa model hasn't downloaded yet
-// - Public endpoint — no auth required
-router.post('/', async (req, res) => {
-  const { reviews: providedReviews, placeId, placeName, address } = req.body || {};
-
-  let reviewTexts = [];
-  let dataSource = 'ai';
-
-  // ── Try scraping Google Maps first ──
-  if (placeId || placeName) {
-    try {
-      const scraped = await scrapeGoogleMapsReviews(
-        { placeId, placeName, address: address || '' },
-        100, // request up to 100 reviews
-      );
-      if (scraped.length > 0) {
-        reviewTexts = scraped;
-        dataSource = 'google_scrape+ai';
-        console.log(`[Sentiment] Using ${scraped.length} scraped reviews`);
-      }
-    } catch (scrapeErr) {
-      console.warn('[Sentiment] Scraping failed, falling back to provided reviews:', scrapeErr.message);
-    }
-  }
-
-  // ── Fall back to client-provided reviews if scraping got nothing ──
-  if (reviewTexts.length === 0 && Array.isArray(providedReviews) && providedReviews.length > 0) {
-    reviewTexts = providedReviews
-      .filter((r) => typeof r === 'string' && r.trim().length > 0)
-      .map((r) => r.trim().slice(0, 512));
-    dataSource = 'places_api+ai';
-  }
-
-  if (reviewTexts.length === 0) {
-    return res.status(400).json({ msg: 'No reviews available for analysis. Provide reviews[] or a placeId/placeName.' });
-  }
-
+// - Protected endpoint for authenticated users
+router.post('/sentiment', protectRoute, async (req, res) => {
   try {
+    const {
+      placeId,
+      placeName,
+      name,
+      address,
+      reviews: providedReviews,
+    } = req.body || {};
+
+    const finalRestaurantName = placeName || name || 'Selected Restaurant';
+
+    let reviewTexts = [];
+    let dataSource = 'ai';
+
+    // 1. Core Scraper and AI Processing Execution Block Runs First
+    if (placeId || placeName) {
+      try {
+        const scraped = await scrapeGoogleMapsReviews(
+          { placeId, placeName, address: address || '' },
+          100,
+        );
+        if (Array.isArray(scraped) && scraped.length > 0) {
+          reviewTexts = scraped;
+          dataSource = 'google_scrape+ai';
+        }
+      } catch (scrapeErr) {
+        console.warn('[Sentiment] Scraping failed, falling back to provided reviews:', scrapeErr.message);
+      }
+    }
+
+    if (reviewTexts.length === 0 && Array.isArray(providedReviews) && providedReviews.length > 0) {
+      reviewTexts = providedReviews
+        .filter((r) => typeof r === 'string' && r.trim().length > 0)
+        .map((r) => r.trim().slice(0, 512));
+      dataSource = 'places_api+ai';
+    }
+
+    if (reviewTexts.length === 0) {
+      return res.status(400).json({ msg: 'No reviews available for analysis. Provide reviews[] or a placeId/placeName.' });
+    }
+
     const result = await analyzeReviews(reviewTexts);
 
-    // Generate a structured review ({ text, sections })
     let naturalReview = null;
     let naturalReviewSections = null;
     let aiOverview = null;
@@ -67,18 +74,17 @@ router.post('/', async (req, res) => {
 
     try {
       const reviewResult = await generateNaturalReview(
-        placeName || 'this restaurant',
+        finalRestaurantName,
         reviewTexts,
         result,
       );
-      // reviewResult is { text, sections } from extractiveSummary
       if (reviewResult && typeof reviewResult === 'object' && reviewResult.sections) {
         naturalReview = reviewResult.text;
         naturalReviewSections = reviewResult.sections;
         aiOverview = reviewResult.sections.find((section) => section.type === 'overview')?.text || reviewResult.text;
         aiVerdict = reviewResult.sections.find((section) => section.type === 'verdict')?.text || reviewResult.text;
       } else {
-        naturalReview = reviewResult; // plain string fallback
+        naturalReview = reviewResult;
         aiOverview = String(reviewResult);
         aiVerdict = String(reviewResult);
       }
@@ -86,12 +92,33 @@ router.post('/', async (req, res) => {
       console.error('[Sentiment] Natural review generation failed:', genErr.message);
     }
 
-    // Reflect which engine was actually used (AI vs VADER fallback)
     const engineSuffix = result.modelUsed === 'vader' ? 'vader' : 'roberta';
     const finalSource = dataSource.replace('+ai', `+${engineSuffix}`);
     const isFallback = result.modelUsed === 'vader' || !naturalReviewSections;
 
-    return res.json({
+    // 2. IMMEDIATE INJECTION BEFORE RESPONSE DELIVERY
+    if (req.user && req.user.id) {
+      try {
+        const countProcessed = result?.reviewCount || (providedReviews && providedReviews.length) || reviewTexts.length || 0;
+        const notificationMessage = `RoBERTa AI analysis for '${finalRestaurantName}' is ready! ${countProcessed} new reviews processed.`;
+
+        console.log(`\n\x1b[32m[NOTIFICATION DEBUG]\x1b[0m Attempting database insert for user: ${req.user.id}`);
+
+        await createSystemNotification(
+          req.user.id,
+          '✨ AI Scraper Completion',
+          notificationMessage,
+          'ai_complete',
+          { placeId: placeId || 'Unknown ID', restaurantName: finalRestaurantName }
+        );
+
+        console.log(`\x1b[32m[NOTIFICATION SUCCESS]\x1b[0m Row successfully saved to MongoDB.\n`);
+      } catch (notiError) {
+        console.error(' [Notification Error] Schema insertion failed:', notiError.message);
+      }
+    }
+
+    const analysis = {
       positive: result.positive,
       neutral: result.neutral,
       negative: result.negative,
@@ -105,10 +132,13 @@ router.post('/', async (req, res) => {
       source: finalSource,
       model: result.modelUsed,
       isFallback,
-    });
-  } catch (err) {
-    console.error('Sentiment analysis error:', err.message);
-    return res.status(500).json({ msg: 'Sentiment analysis failed' });
+    };
+
+    // 3. FINAL ROUTE EXECUTION TERMINATOR (Always placed at the absolute bottom)
+    return res.status(200).json(analysis);
+  } catch (error) {
+    console.error('Critical error in sentiment controller handler loop:', error.message);
+    return res.status(500).json({ msg: 'Internal system processing fault' });
   }
 });
 

@@ -17,6 +17,7 @@ import {
 } from '../lib/auth';
 import { removeFromFavorites } from '../lib/unifiedHistoryService';
 import { useAppContext } from '../src/context/AppContext';
+import NotificationsDrawer from '../components/NotificationsDrawer';
 
 const countryCodeToFlag = (isoCode = '') => {
   if (!isoCode || typeof isoCode !== 'string') return '🏳️';
@@ -113,6 +114,35 @@ const formatJoinDate = (dateValue) => {
   return `Joined ${parsedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
 };
 
+const getBadgeDetails = (visitCount = 0) => {
+  if (visitCount >= 25) {
+    return {
+      title: 'Taste Master',
+      subtitle: 'Visited 25 restaurants',
+      level: 25,
+    };
+  }
+  if (visitCount >= 13) {
+    return {
+      title: 'Food Explorer',
+      subtitle: "You unlocked the 'Food Explorer' badge after visiting 13 restaurants.",
+      level: 13,
+    };
+  }
+  if (visitCount >= 5) {
+    return {
+      title: 'Rising Reviewer',
+      subtitle: 'Visited 5 restaurants',
+      level: 5,
+    };
+  }
+  return {
+    title: 'Keep Going',
+    subtitle: 'Visit 5 restaurants to earn your first badge',
+    level: 0,
+  };
+};
+
 // Built-in cover options
 const BUILTIN_COVERS = [
   { id: 'fast-food', name: 'Fast Food', imageUrl: 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=1200&h=800&fit=crop&q=80' },
@@ -134,6 +164,7 @@ const ProfilePage = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCoverOptionsOpen, setIsCoverOptionsOpen] = useState(false);
+  const [isNotiOpen, setIsNotiOpen] = useState(false);
   const [profileForm, setProfileForm] = useState(() => createProfileForm(storedUser));
   const [countryOptions, setCountryOptions] = useState(PACKAGE_COUNTRY_OPTIONS);
   const [cityOptions, setCityOptions] = useState([]);
@@ -154,6 +185,7 @@ const ProfilePage = () => {
     refreshGlobalHistoryData,
     toggleGlobalFavorite,
   } = useAppContext();
+  const unreadCount = Array.isArray(notifications) ? notifications.filter((n) => !n.isRead).length : 0;
   const [isLoading, setIsLoading] = useState(!globalProfileData?.stats);
   const [removingFavoriteId, setRemovingFavoriteId] = useState(null);
   const isMetricsLoading = globalMetricsLoading;
@@ -163,6 +195,7 @@ const ProfilePage = () => {
 
   // Direct bindings to global context (no local state copies, true reactivity)
   const profileStats = globalProfileData?.stats || { visits: 0, comparisons: 0, searches: 0 };
+  const badgeDetails = getBadgeDetails(profileStats.visits);
   const favoritesCount = globalProfileData?.favoritesCount || 0;
   const favoriteRestaurants = Array.isArray(globalProfileData?.favoriteRestaurants) ? globalProfileData.favoriteRestaurants : [];
 
@@ -228,11 +261,14 @@ const ProfilePage = () => {
       } finally {
         if (!active) return;
         setGlobalMetricsLoading(false);
+        setIsLoading(false);
       }
     };
 
     if (!globalProfileData?.stats) {
       loadProfileMetrics();
+    } else {
+      setIsLoading(false);
     }
 
     return () => {
@@ -1189,31 +1225,80 @@ const ProfilePage = () => {
               }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#0f172a', margin: '0 0 16px' }}>Quick Menu</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  {['🔔 Notifications', '🔒 Privacy & Security', '💳 Payment Methods'].map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      style={{
-                        padding: '12px 14px',
-                        fontSize: '14px',
-                        color: '#0f172a',
-                        background: 'transparent',
-                        border: 'none',
-                        borderRadius: '12px',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        transition: 'background 0.2s',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <span>{item}</span>
-                      <span style={{ fontSize: '16px' }}>›</span>
-                    </button>
-                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsNotiOpen(true)}
+                    style={{
+                      padding: '12px 14px',
+                      fontSize: '14px',
+                      color: '#0f172a',
+                      background: 'transparent',
+                      border: 'none',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🔔 Notifications</span>
+                      {unreadCount > 0 && (
+                        <span style={{ display: 'inline-flex', minWidth: '28px', justifyContent: 'center', padding: '2px 8px', borderRadius: '999px', background: '#4338ca', color: '#ffffff', fontSize: '10px', fontWeight: '700', boxShadow: '0 4px 16px rgba(67,56,202,0.18)', animation: 'pulse 1.6s ease-in-out infinite' }}>
+                          {unreadCount}
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ fontSize: '16px' }}>›</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '12px 14px',
+                      fontSize: '14px',
+                      color: '#0f172a',
+                      background: 'transparent',
+                      border: 'none',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span>🔒 Privacy & Security</span>
+                    <span style={{ fontSize: '16px' }}>›</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      padding: '12px 14px',
+                      fontSize: '14px',
+                      color: '#0f172a',
+                      background: 'transparent',
+                      border: 'none',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span>💳 Payment Methods</span>
+                    <span style={{ fontSize: '16px' }}>›</span>
+                  </button>
                 </div>
                 <button
                   type="button"
@@ -1239,7 +1324,7 @@ const ProfilePage = () => {
                 </button>
               </div>
 
-              {/* FOOD EXPLORER BADGE */}
+              {/* BADGE DETAILS */}
               <div style={{
                 background: '#fef3c7',
                 border: '1px solid #fde68a',
@@ -1247,13 +1332,15 @@ const ProfilePage = () => {
                 padding: '20px 24px',
               }}>
                 <div style={{ fontSize: '12px', fontWeight: '600', color: '#92400e' }}>🎖️ Badge</div>
-                <div style={{ fontSize: '16px', fontWeight: '700', color: '#b45309', marginTop: '8px' }}>Food Explorer</div>
-                <div style={{ fontSize: '13px', color: '#a16207', marginTop: '4px' }}>Visited 40+ restaurants</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#b45309', marginTop: '8px' }}>{badgeDetails.title}</div>
+                <div style={{ fontSize: '13px', color: '#a16207', marginTop: '4px' }}>{badgeDetails.subtitle}</div>
               </div>
             </div>
           </div>
         </div>
       </main>
+
+      <NotificationsDrawer isOpen={isNotiOpen} onClose={() => setIsNotiOpen(false)} />
 
       {/* EDIT MODAL */}
       {isEditModalOpen && (

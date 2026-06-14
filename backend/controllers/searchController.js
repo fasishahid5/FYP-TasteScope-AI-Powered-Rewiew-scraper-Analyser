@@ -1,4 +1,6 @@
 const User = require('../models/User');
+const Notification = require('../models/Notification');
+const { createSystemNotification } = require('../routes/notification');
 
 const HISTORY_DETAILS_FIELDS = [
   'restaurantId',
@@ -64,6 +66,8 @@ const normalizeHistoryKey = (value) => {
   const normalized = String(value).trim();
   return normalized || null;
 };
+
+const MILESTONE_LEVELS = [5, 13, 25];
 
 const getDetailsRestaurantId = (details = null) => {
   if (!details || typeof details !== 'object') return null;
@@ -1067,12 +1071,6 @@ const logVisit = async (req, res) => {
       return res.status(400).json({ msg: 'restaurantId or restaurantDetails is required' });
     }
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ msg: 'User not found' });
-    }
-
-    user.restaurantVisits = Array.isArray(user.restaurantVisits) ? user.restaurantVisits : [];
     const detailsSnapshot = sanitizeRestaurantDetails(restaurantDetails);
     const resolvedRestaurantId = normalizeHistoryKey(
       restaurantId
@@ -1081,19 +1079,75 @@ const logVisit = async (req, res) => {
       || restaurantDetails?.id
     );
 
-    removeHistoryEntriesForAliases(user, [resolvedRestaurantId, ...getDetailsDedupAliases(detailsSnapshot)]);
-    user.restaurantVisits.unshift({
+    const aliasIds = [resolvedRestaurantId, ...getDetailsDedupAliases(detailsSnapshot)]
+      .filter(Boolean)
+      .map((id) => String(id).trim())
+      .filter(Boolean);
+
+    const visitEntry = {
       restaurantId: resolvedRestaurantId,
       visitedAt: new Date(),
       details: detailsSnapshot || undefined,
-    });
-    user.restaurantVisits = user.restaurantVisits.slice(0, 100);
+    };
 
-    await user.save();
+    if (aliasIds.length) {
+      await User.findByIdAndUpdate(
+        userId,
+        {
+          $pull: {
+            restaurantVisits: {
+              restaurantId: { $in: aliasIds },
+            },
+          },
+        },
+        { new: false, runValidators: true }
+      );
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      {
+        $push: {
+          restaurantVisits: {
+            $each: [visitEntry],
+            $position: 0,
+            $slice: 100,
+          },
+        },
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ msg: 'User not found' });
+    }
+
+    const visitCount = Array.isArray(updatedUser.restaurantVisits) ? updatedUser.restaurantVisits.length : 0;
+    const shouldCreateMilestone = MILESTONE_LEVELS.includes(visitCount);
+    if (shouldCreateMilestone) {
+      const existingMilestone = await Notification.findOne({
+        userId,
+        type: 'milestone',
+        'metadata.level': visitCount,
+      });
+      if (!existingMilestone) {
+        try {
+          await createSystemNotification(
+            updatedUser.id || updatedUser._id,
+            '🏅 Level Up!',
+            `You unlocked the '${visitCount === 25 ? 'Taste Master' : visitCount === 13 ? 'Food Explorer' : 'Rising Reviewer'}' badge after visiting ${visitCount} restaurants.`,
+            'milestone',
+            { level: visitCount }
+          );
+        } catch (notifyErr) {
+          console.error('logVisit notification failed:', notifyErr.message);
+        }
+      }
+    }
 
     return res.json({
       msg: 'Visit logged successfully',
-      restaurantVisits: user.restaurantVisits,
+      restaurantVisits: updatedUser.restaurantVisits,
     });
   } catch (err) {
     console.error('logVisit error:', err.message);

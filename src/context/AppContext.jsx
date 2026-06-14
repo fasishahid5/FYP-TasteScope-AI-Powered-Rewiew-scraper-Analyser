@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
-import { API_BASE_URL } from '../../lib/auth';
+import { API_BASE_URL, getStoredToken } from '../../lib/auth';
 import { fetchUnifiedHistory } from '../../lib/unifiedHistoryService';
 import { generateFallbackReviewData, reportSentimentFallback } from '../../lib/reviewHelpers';
 
@@ -16,6 +16,8 @@ export const AppProvider = ({ children }) => {
   const [globalProfileData, setGlobalProfileData] = useState({ stats: null, favoritesCount: 0, favoriteRestaurants: [] });
   const [favoriteIds, setFavoriteIds] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [toasts, setToasts] = useState([]);
+  const notificationsRef = React.useRef([]);
 
   const aiProgressIntervalRef = useRef(null);
   const aiProgressTimeoutRef = useRef(null);
@@ -56,6 +58,19 @@ export const AppProvider = ({ children }) => {
     deriveProfileDataFromHistory(globalHistoryData);
   }, [globalHistoryData, deriveProfileDataFromHistory]);
 
+  useEffect(() => {
+    notificationsRef.current = notifications;
+  }, [notifications]);
+
+  // Toast stack helper
+  const addToast = (title, message, type = 'system') => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, title, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
   const refreshGlobalHistoryData = useCallback(async () => {
     try {
       const data = await fetchUnifiedHistory();
@@ -68,6 +83,71 @@ export const AppProvider = ({ children }) => {
       return null;
     }
   }, []);
+
+  // Live notifications: polling + server-sent events
+  useEffect(() => {
+    let es = null;
+    let pollId = null;
+
+    const startPolling = () => {
+      pollId = setInterval(async () => {
+        try {
+          const token = getStoredToken();
+          const res = await fetch(`${API_BASE_URL}/api/notifications`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setNotifications((prev) => {
+              // simple replace to keep ordering consistent
+              return Array.isArray(data) ? data : prev;
+            });
+          }
+        } catch (e) {
+          // ignore polling errors
+        }
+      }, 8000);
+    };
+
+    const startSSE = () => {
+      try {
+        const token = getStoredToken();
+        if (!token) return;
+        const url = `${API_BASE_URL}/api/notifications/stream?token=${encodeURIComponent(token)}`;
+        es = new EventSource(url);
+        es.onmessage = (ev) => {
+          try {
+            const payload = JSON.parse(ev.data);
+            if (payload && payload.type === 'notification' && payload.notification) {
+              setNotifications((prev) => {
+                const exists = Array.isArray(prev) && prev.find((n) => String(n._id) === String(payload.notification._id));
+                if (exists) return prev;
+                // add a stacked toast for real-time arrival
+                addToast(payload.notification.title || 'New notification', payload.notification.message || '', payload.notification.type || 'system');
+                return [payload.notification, ...prev];
+              });
+            }
+          } catch (err) {
+            // ignore parse errors
+          }
+        };
+        es.onerror = () => {
+          try { es.close(); } catch (e) {}
+          es = null;
+        };
+      } catch (err) {
+        // ignore SSE setup errors
+      }
+    };
+
+    startPolling();
+    startSSE();
+
+    return () => {
+      if (pollId) clearInterval(pollId);
+      if (es) try { es.close(); } catch (e) {}
+    };
+  }, [setNotifications]);
 
   useEffect(() => {
     refreshGlobalHistoryData();
@@ -148,9 +228,13 @@ export const AppProvider = ({ children }) => {
     }
 
     try {
+      const token = getStoredToken();
       const response = await fetch(`${API_BASE_URL}/api/sentiment`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           placeId: placeId || '',
           placeName: placeName,
@@ -173,7 +257,29 @@ export const AppProvider = ({ children }) => {
         source: data.source || 'google_places_aggregator',
         model: data.model || (data.isFallback ? 'google_places_aggregator' : 'roberta'),
       };
+
       setActiveSentimentData(normalizedData);
+      setIsAiLoading(false);
+
+      try {
+        const token = localStorage.getItem('token') || localStorage.getItem('jwt');
+        const notiRes = await fetch('http://localhost:5000/api/notifications', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (notiRes.ok) {
+          const freshNotis = await notiRes.json();
+          // if the newest notification is not present locally, show a stacked toast
+          const newest = Array.isArray(freshNotis) && freshNotis[0];
+          const localNewest = notificationsRef.current && notificationsRef.current[0];
+          if (newest && (!localNewest || String(newest._id) !== String(localNewest._id))) {
+            addToast(newest.title || 'New notification', newest.message || '', newest.type || 'system');
+          }
+          setNotifications(freshNotis);
+        }
+      } catch (syncErr) {
+        console.error('Failed to quietly sync live notifications array:', syncErr);
+      }
+
       return normalizedData;
     } catch (err) {
       console.error('AppContext: sentiment fetch failed:', err);
@@ -224,9 +330,17 @@ export const AppProvider = ({ children }) => {
     appendGlobalHistoryItem,
     toggleGlobalFavorite,
     triggerLiveScrape,
+    // Toast API
+    toasts,
+    setToasts,
+    addToast,
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+    </AppContext.Provider>
+  );
 };
 
 export const useAppContext = () => {

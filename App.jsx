@@ -1,6 +1,6 @@
 import React from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast'; // <--- Professional Toaster Node Added
+import ToastContainer from './components/ToastContainer';
 
 import TasteScopeLanding from './pages/TasteScopeLanding';
 import LoginPage from './pages/LoginPage';
@@ -53,16 +53,8 @@ const App = () => {
 
   return (
     <>
-      {/* 🚀 Global Premium Toaster Component Configuration */}
-      <Toaster 
-        position="top-right" 
-        reverseOrder={false}
-        toastOptions={{
-          // Premium dynamic global alerts styles injection
-          className: 'dark:bg-gray-800 dark:text-white border dark:border-gray-700 font-sans text-sm rounded-xl shadow-lg px-4 py-3',
-          duration: 4000,
-        }}
-      />
+      {/* 🚀 Toast container for stacked animated toasts */}
+      <ToastContainer />
 
       {/* This block defines all app routes. */}
       <Routes>
