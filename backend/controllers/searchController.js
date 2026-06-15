@@ -1187,6 +1187,54 @@ const clearHistory = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/search/visit/cache?search=...
+ * Returns the most recent matching restaurant visit details for the current user
+ */
+const getCachedVisit = async (req, res) => {
+  try {
+    const userId = getCurrentUserId(req);
+    const { search } = req.query;
+
+    if (!userId) return res.status(401).json({ msg: 'Unauthorized' });
+    if (!search) return res.status(400).json({ msg: 'search query is required' });
+
+    const normalizedQuery = normalizeTextKey(search);
+    if (!normalizedQuery) return res.json({ found: false });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ msg: 'User not found' });
+
+    const visits = Array.isArray(user.restaurantVisits) ? user.restaurantVisits : [];
+
+    for (const visit of visits) {
+      const aliases = getHistoryAliases(visit).map(normalizeTextKey).filter(Boolean);
+      if (aliases.includes(normalizedQuery)) {
+        const details = sanitizeRestaurantDetails(visit.details || {});
+        const sentiment = details
+          ? ({
+              positive: details.sentiment || details.sentiment || null,
+              sentiment: details.sentiment || null,
+              reviewCount: details.reviews || 0,
+              aiOverview: details.aiOverview || null,
+              aiVerdict: details.aiVerdict || null,
+              naturalReview: details.naturalReview || null,
+              naturalReviewSections: details.naturalReviewSections || null,
+              source: details.source || 'history',
+            })
+          : null;
+
+        return res.json({ found: true, details, sentiment, visitedAt: visit.visitedAt || null });
+      }
+    }
+
+    return res.json({ found: false });
+  } catch (err) {
+    console.error('getCachedVisit error:', err.message);
+    return res.status(500).json({ msg: 'Server error' });
+  }
+};
+
 module.exports = {
   logSearch,
   logSearchClick,
@@ -1202,4 +1250,5 @@ module.exports = {
   addFavorite,
   removeFavorite,
   getFavorites,
+  getCachedVisit,
 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast'; // 🚀 Premium Toast Alerts Connected
 import {
@@ -18,7 +18,9 @@ import {
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import ToggleRow from '../components/ToggleRow';
 import ActionRow from '../components/ActionRow';
-import { clearStoredAuth, API_BASE_URL, getStoredToken, getStoredUser } from '../lib/auth';
+import PrivacySecurityPanel from '../components/PrivacySecurityPanel';
+import { clearStoredAuth, API_BASE_URL, getStoredToken, getStoredUser, setStoredAuth } from '../lib/auth';
+import { useAppContext } from '../src/context/AppContext';
 import { useSettings } from '../lib/SettingsContext';
 
 export default function SettingsPage() {
@@ -26,6 +28,7 @@ export default function SettingsPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeNav, setActiveNav] = useState('settings');
   const { theme, setTheme, language, setLanguage } = useSettings();
+  const { pushNotificationsEnabled, setPushNotificationsEnabled } = useAppContext();
   const [isLangOpen, setIsLangOpen] = useState(false);
   
   const [notifications, setNotifications] = useState({
@@ -83,6 +86,7 @@ export default function SettingsPage() {
       gridTemplateColumns: '1fr 1fr', 
       gap: '24px',
       marginBottom: '24px',
+      alignItems: 'stretch',
     },
     card: {
       background: isDark ? '#0f1724' : '#ffffff',
@@ -91,6 +95,9 @@ export default function SettingsPage() {
       boxShadow: isDark ? 'none' : '0 18px 50px rgba(15,23,42,0.04)',
       padding: '32px',
       transition: 'all 0.3s ease-out',
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
     },
     sectionHeader: {
       display: 'flex',
@@ -204,9 +211,53 @@ export default function SettingsPage() {
 
   const handleToggle = (section, key) => {
     if (section === 'notifications') {
+      if (key === 'push') {
+        togglePushNotifications();
+        return;
+      }
       setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
     } else if (section === 'privacy') {
       setPrivacy((prev) => ({ ...prev, [key]: !prev[key] }));
+    }
+  };
+
+  useEffect(() => {
+    setNotifications((prev) => ({ ...prev, push: pushNotificationsEnabled }));
+  }, [pushNotificationsEnabled]);
+
+  const togglePushNotifications = async () => {
+    const newValue = !pushNotificationsEnabled;
+    setNotifications((prev) => ({ ...prev, push: newValue }));
+    setPushNotificationsEnabled(newValue);
+
+    try {
+      const token = getStoredToken();
+      const response = await fetch(`${API_BASE_URL}/api/auth/profile`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ pushNotificationsEnabled: newValue }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.msg || 'Failed to save notification preference');
+      }
+
+      const user = getStoredUser();
+      if (user) {
+        localStorage.setItem('user', JSON.stringify({ ...user, pushNotificationsEnabled: newValue }));
+      }
+      if (typeof setStoredAuth === 'function') {
+        // Keep auth persistence in sync if this helper is used elsewhere.
+        setStoredAuth({ token: getStoredToken(), user: { ...user, pushNotificationsEnabled: newValue } });
+      }
+    } catch (err) {
+      setNotifications((prev) => ({ ...prev, push: !newValue }));
+      setPushNotificationsEnabled(!newValue);
+      window.alert(err.message || 'Unable to update notification settings.');
     }
   };
   return (
@@ -247,11 +298,15 @@ export default function SettingsPage() {
               padding: '10px 18px',
               borderRadius: '14px',
               border: 'none',
-              background: 'transparent',
-              color: '#3b82f6',
-              fontWeight: 600,
+              background: '#fef2f2',
+              color: '#b91c1c',
+              fontWeight: 700,
               cursor: 'pointer',
+              boxShadow: '0 10px 24px rgba(185,28,28,0.14)',
+              transition: 'transform 0.18s ease, background 0.18s ease',
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.background = '#fee2e2'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.background = '#fef2f2'; }}
           >
             Sign out
           </button>
@@ -311,47 +366,6 @@ export default function SettingsPage() {
                   );
                 })}
               </div>
-
-              {/* Language Dropdown Selector */}
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: isDark ? '#94a3b8' : '#1e293b' }}>Language</label>
-              <div style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsLangOpen((prev) => !prev)}
-                  style={{
-                    width: '100%',
-                    padding: '14px 16px',
-                    borderRadius: '16px',
-                    border: isDark ? '1px solid #243249' : '1px solid #e2e8f0',
-                    background: isDark ? '#071127' : '#f8fafc',
-                    color: isDark ? '#ffffff' : '#0f172a',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                  }}
-                >
-                  <span>{language}</span>
-                  <ChevronDown size={18} style={{ color: '#64748b', transform: isLangOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
-                {isLangOpen && (
-                  <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: isDark ? '#0f1724' : '#ffffff', border: isDark ? '1px solid #243249' : '1px solid #e2e8f0', borderRadius: '16px', boxShadow: '0 12px 30px rgba(0,0,0,0.15)', overflow: 'hidden', zIndex: 50, maxHeight: '200px', overflowY: 'auto' }}>
-                    {['English', 'Español', 'Français', 'हिंदी', '中文', 'العربية', 'Português', 'Русский', '日本語'].map((lang) => (
-                      <button
-                        key={lang}
-                        type="button"
-                        onClick={() => { setLanguage(lang); setIsLangOpen(false); }}
-                        style={{ width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', textAlign: 'left', color: isDark ? '#e6eef8' : '#0f172a', fontSize: '14px', cursor: 'pointer' }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = isDark ? '#1e293b' : '#f1f5f9'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        {lang}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </section>
             {/* 2. NOTIFICATIONS PREFERENCES VIEW BLOCK */}
             <section style={styles.card}>
@@ -367,48 +381,14 @@ export default function SettingsPage() {
               <div style={{ display: 'grid', gap: '16px' }}>
                 <ToggleRow title="Push Notifications" desc="Receive push notifications on your device" checked={notifications.push} onChange={() => handleToggle('notifications', 'push')} />
                 <ToggleRow title="Email Notifications" desc="Receive updates via email" checked={notifications.email} onChange={() => handleToggle('notifications', 'email')} />
-                <ToggleRow title="Deals & Offers" desc="Get notified about special deals and discounts" checked={notifications.deals} onChange={() => handleToggle('notifications', 'deals')} />
                 <ToggleRow title="Review Reminders" desc="Reminder to review restaurants you visited" checked={notifications.review} onChange={() => handleToggle('notifications', 'review')} />
               </div>
             </section>
 
-            {/* 3. SECURITY DATA CONFIGURATIONS CONSOLE PANEL */}
-            <section style={styles.card}>
-              <div style={styles.sectionHeader}>
-                <div style={styles.iconCircle('#f0fdf4', '#022c22', '#16a34a', '#22c55e')}>
-                  <Shield size={20} />
-                </div>
-                <div>
-                  <h2 style={styles.headingText}>Privacy & Security</h2>
-                  <p style={styles.subText}>Control your data and security preferences.</p>
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '50px' }}>
-                <ToggleRow title="Save Browsing History" desc="Keep track of restaurants you view" checked={privacy.history} onChange={() => handleToggle('privacy', 'history')} />
-                <ToggleRow title="Location Services" desc="Allow app to access your location" checked={privacy.location} onChange={() => handleToggle('privacy', 'location')} />
-                <ToggleRow title="Usage Analytics" desc="Help us improve by sharing anonymous data" checked={privacy.analytics} onChange={() => handleToggle('privacy', 'analytics')} />
-                <ToggleRow title="Personalized Recommendations" desc="Get restaurant suggestions based on your preferences" checked={privacy.personalized} onChange={() => handleToggle('privacy', 'personalized')} />
-              </div>
-            </section>
-
-            {/* 4. SECURITY PROFILE ACCESS SETTINGS CONSOLE */}
-            <section style={styles.card}>
-              <div style={styles.sectionHeader}>
-                <div style={styles.iconCircle('#fffbeb', '#451a03', '#d97706', '#f59e0b')}>
-                  <Lock size={20} />
-                </div>
-                <div>
-                  <h2 style={styles.headingText}>Account</h2>
-                  <p style={styles.subText}>Manage your account settings</p>
-                </div>
-              </div>
-              <div style={{ display: 'grid', gap: '16px' }}>
-                <ActionRow icon={<Key size={16} />} title="Change Password" desc="Update your password" onClick={handleChangePassword} />
-                <ActionRow icon={<Mail size={16} />} title="Change Email" desc="Update your email address" onClick={handleChangeEmail} />
-                <ActionRow icon={<Download size={16} />} title="Download My Data" desc="Get a copy of your data" onClick={handleDownloadData} />
-                <ActionRow icon={<Trash2 size={16} />} title="Delete Account" desc="Permanently delete your account" isDelete onClick={handleDeleteAccount} />
-              </div>
-            </section>
+            {/* 3. PRIVACY & SECURITY PANEL */}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <PrivacySecurityPanel onAccountDeleted={() => navigate('/login', { replace: true })} />
+            </div>
 
             {/* 5. OVERALL LOWER TECHNICAL SERVICE TICKET HELPDESK ROW */}
             <section style={{ ...styles.card, gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>

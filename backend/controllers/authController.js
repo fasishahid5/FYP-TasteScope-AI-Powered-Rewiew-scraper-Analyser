@@ -4,6 +4,11 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const User = require('../models/User');
 const { toPublicUser } = require('../utils/user');
+const {
+  sendPasswordChangedEmail,
+  sendNewLoginDetectedEmail,
+  sendAiAnalysisCompleteEmail,
+} = require('../lib/mailer');
 
 let worldCountries = [];
 try {
@@ -291,15 +296,18 @@ const getMe = async (req, res) => {
 
 const updateProfile = async (req, res) => {
   const {
-    firstName = '',
-    lastName = '',
-    bio = '',
-    phone = '',
-    city = '',
-    country = '',
-    countryCode = '',
-    avatarUrl = '',
-    coverUrl = '',
+    firstName,
+    lastName,
+    bio,
+    phone,
+    city,
+    country,
+    countryCode,
+    avatarUrl,
+    coverUrl,
+    locationEnabled,
+    pushNotificationsEnabled,
+    emailNotificationsEnabled,
   } = req.body || {};
 
   try {
@@ -325,18 +333,28 @@ const updateProfile = async (req, res) => {
       return res.status(400).json({ msg: 'First name and last name are required.' });
     }
 
-    user.bio = safe(bio);
-    user.phone = safe(phone);
-    user.city = safe(city);
-    user.country = safe(country);
-    user.countryCode = safe(countryCode);
-    if (typeof avatarUrl === 'string') {
+    if (typeof bio !== 'undefined') user.bio = safe(bio);
+    if (typeof phone !== 'undefined') user.phone = safe(phone);
+    if (typeof city !== 'undefined') user.city = safe(city);
+    if (typeof country !== 'undefined') user.country = safe(country);
+    if (typeof countryCode !== 'undefined') user.countryCode = safe(countryCode);
+    if (typeof avatarUrl !== 'undefined' && typeof avatarUrl === 'string') {
       const av = avatarUrl.trim();
       if (av && av !== 'undefined') user.avatarUrl = av;
     }
-    if (typeof coverUrl === 'string') {
+    if (typeof coverUrl !== 'undefined' && typeof coverUrl === 'string') {
       const cv = coverUrl.trim();
       if (cv && cv !== 'undefined') user.coverUrl = cv;
+    }
+    if (typeof locationEnabled === 'boolean') {
+      user.locationEnabled = locationEnabled;
+    }
+    if (typeof pushNotificationsEnabled === 'boolean') {
+      user.pushNotificationsEnabled = pushNotificationsEnabled;
+    }
+    if (typeof emailNotificationsEnabled === 'boolean') {
+      user.preferences = user.preferences || {};
+      user.preferences.emailNotificationsEnabled = emailNotificationsEnabled;
     }
 
     const composedName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
@@ -376,4 +394,7 @@ module.exports = {
   updateProfile,
   getCountries,
   getCities,
+  sendPasswordChangedEmail,
+  sendNewLoginDetectedEmail,
+  sendAiAnalysisCompleteEmail,
 };

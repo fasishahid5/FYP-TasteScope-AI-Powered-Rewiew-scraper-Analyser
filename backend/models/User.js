@@ -213,6 +213,20 @@ const userSchema = new mongoose.Schema({
     enum: ['local', 'google', 'facebook', 'apple'],
     default: 'local',
   },
+  locationEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  pushNotificationsEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  preferences: {
+    emailNotificationsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+  },
   ownerRequest: {
     status: {
       type: String,

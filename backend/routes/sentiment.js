@@ -4,6 +4,8 @@ const { analyzeReviews } = require('../services/sentimentService');
 const { generateNaturalReview } = require('../services/aiSentimentService');
 const { scrapeGoogleMapsReviews } = require('../services/googleReviewsScraper');
 const { createSystemNotification } = require('../routes/notification');
+const { sendAiAnalysisCompleteEmail } = require('../lib/mailer');
+const User = require('../models/User');
 
 const router = express.Router();
 
@@ -31,6 +33,8 @@ router.post('/sentiment', protectRoute, async (req, res) => {
       name,
       address,
       reviews: providedReviews,
+      restaurantId,
+      restaurant,
     } = req.body || {};
 
     const finalRestaurantName = placeName || name || 'Selected Restaurant';
@@ -99,6 +103,9 @@ router.post('/sentiment', protectRoute, async (req, res) => {
     // 2. IMMEDIATE INJECTION BEFORE RESPONSE DELIVERY
     if (req.user && req.user.id) {
       try {
+          if (req.user.pushNotificationsEnabled === false) {
+            console.log(`\x1b[33m[NOTIFICATION SKIP]\x1b[0m User ${req.user.id} has push notifications disabled, skipping notification creation.`);
+          } else {
         const countProcessed = result?.reviewCount || (providedReviews && providedReviews.length) || reviewTexts.length || 0;
         const notificationMessage = `RoBERTa AI analysis for '${finalRestaurantName}' is ready! ${countProcessed} new reviews processed.`;
 
@@ -113,6 +120,27 @@ router.post('/sentiment', protectRoute, async (req, res) => {
         );
 
         console.log(`\x1b[32m[NOTIFICATION SUCCESS]\x1b[0m Row successfully saved to MongoDB.\n`);
+
+        // Send email notification to user (isolated try/catch to prevent breaking main response)
+        try {
+          const user = await User.findById(req.user.id);
+          if (user) {
+            const sentimentScore = (result.positive / 100) * 5;
+            const activeRestaurantId = restaurantId || restaurant?._id || placeId || 'unknown';
+            await sendAiAnalysisCompleteEmail(
+              user,
+              user.email,
+              user.name,
+              finalRestaurantName,
+              sentimentScore,
+              activeRestaurantId,
+            );
+            console.log(`\x1b[36m[EMAIL SENT]\x1b[0m Analysis completion email dispatched to ${user.email}`);
+          }
+        } catch (emailErr) {
+          console.warn(`\x1b[33m[EMAIL ERROR]\x1b[0m Failed to send analysis email: ${emailErr.message}`);
+        }
+          }
       } catch (notiError) {
         console.error(' [Notification Error] Schema insertion failed:', notiError.message);
       }

@@ -9,6 +9,7 @@ const {
   getUnifiedHistory,
   saveComparison,
   logVisit,
+  getCachedVisit,
   clearHistory,
   toggleFavorite,
   addFavorite,
@@ -34,6 +35,7 @@ router.delete('/history/:historyId', protectRoute, deleteUnifiedHistoryItem);
 // Comparison endpoints
 router.post('/comparison/save', protectRoute, saveComparison);
 router.post('/visit/log', protectRoute, logVisit);
+router.get('/visit/cache', protectRoute, getCachedVisit);
 
 // Favorites endpoints
 router.get('/favorites', protectRoute, getFavorites);

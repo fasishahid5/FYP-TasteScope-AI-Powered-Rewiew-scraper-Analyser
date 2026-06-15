@@ -22,7 +22,7 @@ const NotificationSkeleton = () => (
 );
 
 const NotificationsDrawer = ({ isOpen, onClose }) => {
-  const { notifications, setNotifications } = useAppContext();
+  const { notifications, setNotifications, pushNotificationsEnabled } = useAppContext();
   const [isLoading, setIsLoading] = useState(false);
   const [localNotifications, setLocalNotifications] = useState(Array.isArray(notifications) ? notifications : []);
 
@@ -33,27 +33,26 @@ const NotificationsDrawer = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (!isOpen) return undefined;
 
+    if (pushNotificationsEnabled === false) {
+      setLocalNotifications([]);
+      setIsLoading(false);
+      return undefined;
+    }
+
     let active = true;
-    const token = getStoredToken();
 
     const loadNotifications = async () => {
       setIsLoading(true);
       try {
         const tokenToUse = getStoredToken?.() || localStorage.getItem('token');
-        const headers = {
-          'Content-Type': 'application/json',
-        };
-        if (tokenToUse) {
-          headers.Authorization = `Bearer ${tokenToUse}`;
-        }
+        const headers = { 'Content-Type': 'application/json' };
+        if (tokenToUse) headers.Authorization = `Bearer ${tokenToUse}`;
 
         const response = await fetch(`${API_BASE_URL}/api/notifications`, {
           method: 'GET',
           headers,
         });
-        if (!response.ok) {
-          throw new Error(`Failed to load notifications (${response.status})`);
-        }
+        if (!response.ok) throw new Error(`Failed to load notifications (${response.status})`);
         const data = await response.json();
         const items = Array.isArray(data) ? data : Array.isArray(data.notifications) ? data.notifications : [];
         if (!active) return;
@@ -70,7 +69,7 @@ const NotificationsDrawer = ({ isOpen, onClose }) => {
     return () => {
       active = false;
     };
-  }, [isOpen, setNotifications]);
+  }, [isOpen, pushNotificationsEnabled, setNotifications]);
 
   const handleMarkRead = async (notificationId) => {
     if (!notificationId) return;
@@ -87,12 +86,8 @@ const NotificationsDrawer = ({ isOpen, onClose }) => {
 
     try {
       const tokenToUse = getStoredToken?.() || localStorage.getItem('token');
-      const headers = {
-        'Content-Type': 'application/json',
-      };
-      if (tokenToUse) {
-        headers.Authorization = `Bearer ${tokenToUse}`;
-      }
+      const headers = { 'Content-Type': 'application/json' };
+      if (tokenToUse) headers.Authorization = `Bearer ${tokenToUse}`;
 
       await fetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(notificationId)}/read`, {
         method: 'PUT',
@@ -142,7 +137,15 @@ const NotificationsDrawer = ({ isOpen, onClose }) => {
               </div>
             ) : (
               <div className="flex h-full flex-col">
-                {visibleNotifications.length === 0 ? (
+                {pushNotificationsEnabled === false ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center rounded-3xl border border-gray-100 bg-white p-8 text-center shadow-sm">
+                    <div className="mb-4 text-4xl">🔕</div>
+                    <p className="font-semibold text-gray-700 text-sm">Notifications paused</p>
+                    <p className="mt-3 text-xs text-gray-400 max-w-[300px] leading-relaxed">
+                      Real-time updates are disabled because push notifications are turned off. Enable them in Settings to receive activity feed alerts.
+                    </p>
+                  </div>
+                ) : visibleNotifications.length === 0 ? (
                   <div className="flex h-full w-full flex-col items-center justify-center rounded-3xl border border-gray-100 bg-white p-8 text-center shadow-sm">
                     <div className="mb-4 text-4xl">📭</div>
                     <p className="font-semibold text-gray-700 text-sm">Your feed is all caught up</p>

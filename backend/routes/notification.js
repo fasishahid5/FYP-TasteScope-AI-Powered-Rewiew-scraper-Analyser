@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const EventEmitter = require('events');
+const User = require('../models/User');
 const protectRoute = require('../middleware/auth');
 const Notification = require('../models/Notification');
 
@@ -78,6 +79,12 @@ router.post('/test-trigger', protectRoute, async (req, res) => {
 async function createSystemNotification(userId, title, message, type = 'ai_complete', metadata = {}) {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error('Invalid userId');
+  }
+
+  const user = await User.findById(userId).select('pushNotificationsEnabled');
+  if (user && user.pushNotificationsEnabled === false) {
+    console.log(`Notification suppressed for user ${userId}; push notifications are disabled.`);
+    return null;
   }
 
   const sanitizedType = String(type || 'ai_complete').toLowerCase().trim().replace(/-/g, '_');

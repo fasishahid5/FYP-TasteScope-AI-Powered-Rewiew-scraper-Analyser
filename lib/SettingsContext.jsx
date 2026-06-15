@@ -5,11 +5,21 @@ const SettingsContext = createContext({
   setTheme: () => {},
   language: 'English',
   setLanguage: () => {},
+  locationEnabled: true,
+  setLocationEnabled: () => {},
 });
 
 export const SettingsProvider = ({ children }) => {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system');
   const [language, setLanguage] = useState(() => localStorage.getItem('language') || 'English');
+  const [locationEnabled, setLocationEnabled] = useState(() => {
+    try {
+      const storedValue = localStorage.getItem('locationEnabled');
+      return storedValue === null ? true : storedValue === 'true';
+    } catch (e) {
+      return true;
+    }
+  });
 
   // Persist to localStorage
   useEffect(() => {
@@ -19,6 +29,10 @@ export const SettingsProvider = ({ children }) => {
   useEffect(() => {
     try { localStorage.setItem('language', language); } catch (e) {}
   }, [language]);
+
+  useEffect(() => {
+    try { localStorage.setItem('locationEnabled', String(locationEnabled)); } catch (e) {}
+  }, [locationEnabled]);
 
   // Apply theme to document element
   useEffect(() => {
@@ -70,7 +84,7 @@ export const SettingsProvider = ({ children }) => {
   }, [language]);
 
   return (
-    <SettingsContext.Provider value={{ theme, setTheme, language, setLanguage }}>
+    <SettingsContext.Provider value={{ theme, setTheme, language, setLanguage, locationEnabled, setLocationEnabled }}>
       {children}
     </SettingsContext.Provider>
   );

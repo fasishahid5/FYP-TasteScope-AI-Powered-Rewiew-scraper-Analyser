@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
-import { API_BASE_URL, getStoredToken } from '../../lib/auth';
+import { API_BASE_URL, getStoredToken, getStoredUser } from '../../lib/auth';
 import { fetchUnifiedHistory } from '../../lib/unifiedHistoryService';
 import { generateFallbackReviewData, reportSentimentFallback } from '../../lib/reviewHelpers';
 
@@ -16,6 +16,10 @@ export const AppProvider = ({ children }) => {
   const [globalProfileData, setGlobalProfileData] = useState({ stats: null, favoritesCount: 0, favoriteRestaurants: [] });
   const [favoriteIds, setFavoriteIds] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [pushNotificationsEnabled, setPushNotificationsEnabled] = useState(() => {
+    const storedUser = getStoredUser();
+    return storedUser?.pushNotificationsEnabled !== false;
+  });
   const [toasts, setToasts] = useState([]);
   const notificationsRef = React.useRef([]);
 
@@ -89,6 +93,13 @@ export const AppProvider = ({ children }) => {
     let es = null;
     let pollId = null;
 
+    const notificationsEnabled = pushNotificationsEnabled !== false;
+
+    if (!notificationsEnabled) {
+      setNotifications([]);
+      return undefined;
+    }
+
     const startPolling = () => {
       pollId = setInterval(async () => {
         try {
@@ -147,7 +158,17 @@ export const AppProvider = ({ children }) => {
       if (pollId) clearInterval(pollId);
       if (es) try { es.close(); } catch (e) {}
     };
-  }, [setNotifications]);
+  }, [pushNotificationsEnabled, setNotifications]);
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const storedUser = getStoredUser();
+      setPushNotificationsEnabled(storedUser?.pushNotificationsEnabled !== false);
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   useEffect(() => {
     refreshGlobalHistoryData();
@@ -320,6 +341,8 @@ export const AppProvider = ({ children }) => {
     setGlobalMetricsLoading,
     notifications,
     setNotifications,
+    pushNotificationsEnabled,
+    setPushNotificationsEnabled,
     globalHistoryData,
     setGlobalHistoryData,
     globalProfileData,

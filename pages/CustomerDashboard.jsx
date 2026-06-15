@@ -1,13 +1,15 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { MapPinOff } from 'lucide-react';
 import SidebarNav, { SidebarToggleIcon } from '../components/SidebarNav';
 import GoogleMapView from '../components/GoogleMapView';
 import AutocompleteSearch from '../components/AutocompleteSearch';
 import { useRestaurants } from '../lib/useRestaurants';
-import { API_BASE_URL, getStoredUser } from '../lib/auth';
+import { API_BASE_URL, getStoredUser, getStoredToken } from '../lib/auth';
 import { getFavoritesList, logVisitToDatabase, toggleFavoriteRestaurant } from '../lib/unifiedHistoryService';
 import { generateFallbackReviewData, reportSentimentFallback } from '../lib/reviewHelpers';
 import { useAppContext } from '../src/context/AppContext';
+import { useSettings } from '../lib/SettingsContext';
 
 // Filter icon for the filter button.
 const FilterIcon = () => (
@@ -223,11 +225,13 @@ const CustomerDashboard = () => {
   // Geolocation and nearby filtering
   const [userLocation, setUserLocation] = useState(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [locationStatus, setLocationStatus] = useState(null);
 
   // Real nearby restaurants fetched from Google Places
   const [nearbyRestaurants, setNearbyRestaurants] = useState([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const { restaurants: restaurantsData, isLoading: restaurantsLoading, error: restaurantsError, isFallback: restaurantsIsFallback } = useRestaurants();
+  const { locationEnabled } = useSettings();
 
   // Searched place marker and details
   const [selectedSearchPlace, setSelectedSearchPlace] = useState(null);
@@ -340,6 +344,8 @@ const CustomerDashboard = () => {
   }, [selectedPlaceDetails?.placeId, triggerLiveScrape, isAiLoading, activeSentimentData?.placeId]);
 
   const visitedSentimentLogRef = React.useRef(null);
+  const deepLinkHandledRef = React.useRef(false);
+  const [searchParams] = useSearchParams();
 
   const buildPersistedRestaurantDetails = (restaurant = {}, sentiment = null) => {
     if (!restaurant || typeof restaurant !== 'object') return restaurant;
@@ -367,6 +373,44 @@ const CustomerDashboard = () => {
     const enrichedDetails = buildPersistedRestaurantDetails(selectedPlaceDetails, sentimentData);
     logVisitToDatabase(placeId, enrichedDetails);
   }, [selectedPlaceDetails, sentimentData]);
+
+  // Deep-link: load cached sentiment quickly if ?search=... is present
+  useEffect(() => {
+    const q = searchParams.get('search');
+    if (!q || deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+
+    (async () => {
+      try {
+        const token = getStoredToken() || getStoredUser()?.token || null;
+        const res = await fetch(`${API_BASE_URL}/api/search/visit/cache?search=${encodeURIComponent(q)}`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        if (!res.ok) {
+          // fallback to live scrape
+          triggerLiveScrape({ name: q });
+          return;
+        }
+
+        const data = await res.json().catch(() => null);
+        if (data && data.found && data.details) {
+          setSelectedPlaceDetails(data.details);
+          if (data.sentiment) {
+            setSentimentData({ ...data.sentiment, loading: false, placeId: data.details.placeId || data.details.restaurantId || data.details.id || q });
+          }
+        } else {
+          // not found: start live scrape using the query as name
+          triggerLiveScrape({ name: q });
+        }
+      } catch (err) {
+        triggerLiveScrape({ name: q });
+      }
+    })();
+
+  }, []);
 
   // Compute distance (km) between two lat/lng points using Haversine formula
   const distanceKm = (lat1, lon1, lat2, lon2) => {
@@ -539,10 +583,20 @@ const CustomerDashboard = () => {
 
   // Auto-fetch user location on dashboard mount
   useEffect(() => {
+    if (!locationEnabled) {
+      setNearbyRestaurants([]);
+      setUserLocation(null);
+      setLocationLoading(false);
+      setLocationStatus('disabled_by_user');
+      return;
+    }
+
+    setLocationStatus(null);
     if (!navigator.geolocation) {
       console.log('Geolocation not supported');
       return;
     }
+
     setLocationLoading(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -556,7 +610,7 @@ const CustomerDashboard = () => {
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, []);
+  }, [locationEnabled]);
 
   return (
     <div style={{
@@ -673,6 +727,12 @@ const CustomerDashboard = () => {
             <button
               title={userLocation ? `📍 Your location: ${userLocation.lat.toFixed(3)}°, ${userLocation.lng.toFixed(3)}°` : "Show nearby restaurants"}
               onClick={() => {
+                if (!locationEnabled) {
+                  setNearbyRestaurants([]);
+                  setLocationStatus('disabled_by_user');
+                  setLocationLoading(false);
+                  return;
+                }
                 setLocationLoading(true);
                 if (!navigator.geolocation) {
                   alert('Geolocation not supported by this browser');
@@ -827,7 +887,75 @@ const CustomerDashboard = () => {
               alignContent: 'start',
             }}>
               {/* Display searched place with FINAL CARD DESIGN */}
-              {selectedPlaceDetails && (
+              {(!locationEnabled || locationStatus === 'disabled_by_user') ? (
+                <div style={{ gridColumn: '1 / -1', padding: '48px 0', display: 'flex', justifyContent: 'center' }}>
+                  <div style={{
+                    width: '100%', maxWidth: '52rem',
+                    background: '#fffbeb',
+                    border: '1px solid rgba(245,158,11,0.24)',
+                    borderRadius: '32px',
+                    padding: '40px 36px',
+                    boxShadow: '0 28px 60px rgba(15,23,42,0.08)',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '18px',
+                  }}>
+                    <div style={{
+                      width: '72px',
+                      height: '72px',
+                      borderRadius: '999px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: '#fef3c7',
+                      boxShadow: '0 20px 55px rgba(245,158,11,0.16)',
+                    }}>
+                      <MapPinOff style={{ width: '32px', height: '32px', color: '#d97706' }} />
+                    </div>
+                    <h2 style={{
+                      margin: 0,
+                      fontSize: '1.75rem',
+                      fontWeight: 800,
+                      color: '#0f172a',
+                      letterSpacing: '-0.03em',
+                    }}>
+                      Location Access is Turned Off
+                    </h2>
+                    <p style={{
+                      margin: 0,
+                      maxWidth: '40rem',
+                      lineHeight: 1.8,
+                      color: '#475569',
+                      fontSize: '1rem',
+                    }}>
+                      To safely auto-discover and view sentiment analytics for restaurants around you, please activate location lookup permissions in your Privacy & Security profiles settings.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/settings')}
+                      style={{
+                        cursor: 'pointer',
+                        border: 'none',
+                        borderRadius: '999px',
+                        background: '#0f172a',
+                        color: '#ffffff',
+                        padding: '14px 28px',
+                        fontSize: '0.95rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.01em',
+                        boxShadow: '0 16px 40px rgba(15,23,42,0.18)',
+                        transition: 'transform 0.18s ease, background 0.18s ease',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.background = '#111827'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.background = '#0f172a'; }}
+                    >
+                      Open Privacy Settings
+                    </button>
+                  </div>
+                </div>
+              ) : selectedPlaceDetails && (
                 <div
                   style={{
                     gridColumn: '1 / -1',
@@ -1275,7 +1403,7 @@ const CustomerDashboard = () => {
                 </div>
               )}
 
-              {filteredRestaurants.length === 0 && !selectedPlaceDetails ? (
+              {filteredRestaurants.length === 0 && !selectedPlaceDetails && locationEnabled && locationStatus !== 'disabled_by_user' ? (
                 <div style={{
                   gridColumn: '1 / -1', textAlign: 'center',
                   color: '#94a3b8', padding: '48px 0', fontSize: '14px',

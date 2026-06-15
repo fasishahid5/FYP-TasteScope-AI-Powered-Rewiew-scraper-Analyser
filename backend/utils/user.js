@@ -36,6 +36,10 @@ const toPublicUser = (userDoc, options = {}) => {
     role: normalizeRole(user.role),
     provider: user.provider,
     isVerified: Boolean(user.isVerified),
+    pushNotificationsEnabled: user.pushNotificationsEnabled !== false,
+    preferences: {
+      emailNotificationsEnabled: user.preferences?.emailNotificationsEnabled !== false,
+    },
     createdAt: user.createdAt,
   };
 

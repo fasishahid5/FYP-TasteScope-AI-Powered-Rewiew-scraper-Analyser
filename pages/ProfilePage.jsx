@@ -1257,71 +1257,27 @@ const ProfilePage = () => {
                   </button>
                   <button
                     type="button"
+                    onClick={handleLogout}
                     style={{
+                      marginTop: '16px',
+                      width: '100%',
                       padding: '12px 14px',
                       fontSize: '14px',
-                      color: '#0f172a',
-                      background: 'transparent',
-                      border: 'none',
+                      fontWeight: '600',
+                      color: '#dc2626',
+                      background: '#fee2e2',
+                      border: '1px solid #fecaca',
                       borderRadius: '12px',
                       cursor: 'pointer',
-                      textAlign: 'left',
                       display: 'flex',
-                      justifyContent: 'space-between',
                       alignItems: 'center',
-                      transition: 'background 0.2s',
+                      justifyContent: 'flex-start',
+                      gap: '8px',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <span>🔒 Privacy & Security</span>
-                    <span style={{ fontSize: '16px' }}>›</span>
-                  </button>
-                  <button
-                    type="button"
-                    style={{
-                      padding: '12px 14px',
-                      fontSize: '14px',
-                      color: '#0f172a',
-                      background: 'transparent',
-                      border: 'none',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    <span>💳 Payment Methods</span>
-                    <span style={{ fontSize: '16px' }}>›</span>
+                    🚪 Log Out
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  style={{
-                    marginTop: '16px',
-                    width: '100%',
-                    padding: '12px 14px',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    color: '#dc2626',
-                    background: '#fee2e2',
-                    border: '1px solid #fecaca',
-                    borderRadius: '12px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'flex-start',
-                    gap: '8px',
-                  }}
-                >
-                  🚪 Log Out
-                </button>
               </div>
 
               {/* BADGE DETAILS */}
